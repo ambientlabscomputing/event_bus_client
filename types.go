@@ -17,11 +17,61 @@ func (wf *WebsocketFrame) ToPing() WFPingMessage {
 }
 
 func (wf *WebsocketFrame) ToMessage() WFMessage {
-	message, ok := wf.Payload.(WFMessage)
+	// Payload comes in as map[string]interface{} from JSON unmarshaling
+	payloadMap, ok := wf.Payload.(map[string]interface{})
 	if !ok {
 		return WFMessage{}
 	}
-	return message
+
+	eventPayload := EventPayload{}
+
+	// Extract offset and partition_id from top level
+	if offset, ok := payloadMap["offset"].(float64); ok {
+		eventPayload.Offset = int(offset)
+	}
+	if partitionID, ok := payloadMap["partition_id"].(string); ok {
+		eventPayload.PartitionID = partitionID
+	}
+
+	// Extract nested message object
+	msgMap, ok := payloadMap["message"].(map[string]interface{})
+	if !ok {
+		return WFMessage{}
+	}
+
+	msg := Message{}
+	if id, ok := msgMap["id"].(string); ok {
+		msg.ID = id
+	}
+	if topic, ok := msgMap["topic"].(string); ok {
+		msg.Topic = topic
+	}
+	if content, ok := msgMap["content"].(string); ok {
+		msg.Content = content
+	}
+	// Store offset and partition in message for convenience
+	msg.Offset = eventPayload.Offset
+	msg.PartitionID = eventPayload.PartitionID
+
+	if targetType, ok := msgMap["target_type"].(string); ok {
+		msg.TargetType = &targetType
+	}
+	if targetID, ok := msgMap["target_id"].(string); ok {
+		msg.TargetID = &targetID
+	}
+	if traceID, ok := msgMap["trace_id"].(string); ok {
+		msg.TraceID = &traceID
+	}
+	if orgID, ok := msgMap["org_id"].(string); ok {
+		msg.OrgID = &orgID
+	}
+
+	eventPayload.Message = msg
+
+	return WFMessage{
+		WebsocketFrame: *wf,
+		Payload:        eventPayload,
+	}
 }
 
 type WFPingMessage struct {
@@ -88,31 +138,64 @@ type WFSubscriptionResp struct {
 }
 
 func (wf *WebsocketFrame) ToSubscriptionResp() WFSubscriptionResp {
-	resp, ok := wf.Payload.(WFSubscriptionResp)
+	// Payload comes in as map[string]interface{} from JSON unmarshaling
+	payloadMap, ok := wf.Payload.(map[string]interface{})
 	if !ok {
 		return WFSubscriptionResp{}
 	}
-	return resp
+
+	subResp := SubscriptionResponse{}
+	if subID, ok := payloadMap["subscription_id"].(string); ok {
+		subResp.SubscriptionID = subID
+	}
+	if topic, ok := payloadMap["topic"].(string); ok {
+		subResp.Topic = topic
+	}
+	if groupID, ok := payloadMap["group_id"].(string); ok {
+		subResp.GroupID = groupID
+	}
+
+	return WFSubscriptionResp{
+		WebsocketFrame: *wf,
+		Payload:        subResp,
+	}
 }
 
 // the main message structure used in the event bus
 type Message struct {
-	ID         string  `bson:"_id,omitempty" json:"id"`
-	Topic      string  `bson:"topic" json:"topic"`
-	Content    string  `bson:"content" json:"content"`
-	TargetType *string `bson:"target_type" json:"target_type"`
-	TargetID   *string `bson:"target_id" json:"target_id"`
-	TraceID    *string `bson:"trace_id,omitempty" json:"trace_id,omitempty"`
-	OrgID      *string `bson:"org_id,omitempty" json:"org_id,omitempty"`
+	ID          string  `bson:"_id,omitempty" json:"id"`
+	Topic       string  `bson:"topic" json:"topic"`
+	Content     string  `bson:"content" json:"content"`
+	Offset      int     `bson:"offset,omitempty" json:"offset,omitempty"`
+	PartitionID string  `bson:"partition_id,omitempty" json:"partition_id,omitempty"`
+	TargetType  *string `bson:"target_type" json:"target_type"`
+	TargetID    *string `bson:"target_id" json:"target_id"`
+	TraceID     *string `bson:"trace_id,omitempty" json:"trace_id,omitempty"`
+	OrgID       *string `bson:"org_id,omitempty" json:"org_id,omitempty"`
 }
 
+// EventPayload wraps a message with offset and partition metadata (for consuming)
+type EventPayload struct {
+	Offset      int     `json:"offset"`
+	PartitionID string  `json:"partition_id"`
+	Message     Message `json:"message"`
+}
+
+// WFMessage for consuming events (with offset and partition wrapper)
 type WFMessage struct {
+	WebsocketFrame `json:",inline"`
+	Payload        EventPayload `json:"payload"`
+}
+
+// WFPublishMessage for publishing events (direct message fields)
+type WFPublishMessage struct {
 	WebsocketFrame `json:",inline"`
 	Payload        Message `json:"payload"`
 }
 
-func NewWebsocketFramedMessage(msg Message) WFMessage {
-	return WFMessage{
+func NewWebsocketFramedMessage(msg Message) WFPublishMessage {
+	// When publishing, send message fields directly in payload
+	return WFPublishMessage{
 		WebsocketFrame: WebsocketFrame{
 			MessageType: "event",
 			Version:     "1.0",
@@ -134,15 +217,32 @@ type WFAppendMessageResp struct {
 }
 
 func (wf *WebsocketFrame) ToAppendMessageResp() WFAppendMessageResp {
-	resp, ok := wf.Payload.(WFAppendMessageResp)
+	// Payload comes in as map[string]interface{} from JSON unmarshaling
+	payloadMap, ok := wf.Payload.(map[string]interface{})
 	if !ok {
 		return WFAppendMessageResp{}
 	}
-	return resp
+
+	appendResp := AppendMessageResponse{}
+	if offset, ok := payloadMap["offset"].(float64); ok {
+		appendResp.Offset = int(offset)
+	}
+	if partitionID, ok := payloadMap["partition_id"].(string); ok {
+		appendResp.PartitionID = partitionID
+	}
+	if topic, ok := payloadMap["topic"].(string); ok {
+		appendResp.Topic = topic
+	}
+
+	return WFAppendMessageResp{
+		WebsocketFrame: *wf,
+		Payload:        appendResp,
+	}
 }
 
 type OffsetCommitMsg struct {
 	SubscriptionID string `json:"subscription_id"`
+	PartitionID    string `json:"partition_id"`
 	Offset         int    `json:"offset"`
 	GroupID        string `json:"group_id"`
 }

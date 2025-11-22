@@ -251,3 +251,108 @@ type WFOffsetCommitMsg struct {
 	WebsocketFrame `json:",inline"`
 	Payload        OffsetCommitMsg `json:"payload"`
 }
+
+// FetchPayload is an empty payload for fetch requests
+type FetchPayload struct{}
+
+// WFFetchMessage represents a fetch request to pull new messages
+type WFFetchMessage struct {
+	WebsocketFrame `json:",inline"`
+	Payload        FetchPayload `json:"payload"`
+}
+
+// FetchResponseEvent represents a single event in a fetch response
+type FetchResponseEvent struct {
+	SubscriptionID string  `json:"subscription_id"`
+	PartitionID    string  `json:"partition_id"`
+	Offset         int     `json:"offset"`
+	Message        Message `json:"message"`
+}
+
+// FetchResponsePayload contains the array of events from a fetch request
+type FetchResponsePayload struct {
+	Count    int                  `json:"count"`
+	Messages []FetchResponseEvent `json:"messages"`
+}
+
+// WFFetchResponse represents a fetch response with messages
+type WFFetchResponse struct {
+	WebsocketFrame `json:",inline"`
+	Payload        FetchResponsePayload `json:"payload"`
+}
+
+func (wf *WebsocketFrame) ToFetchResponse() WFFetchResponse {
+	// Payload comes in as map[string]interface{} from JSON unmarshaling
+	payloadMap, ok := wf.Payload.(map[string]interface{})
+	if !ok {
+		return WFFetchResponse{}
+	}
+
+	fetchResp := FetchResponsePayload{}
+
+	if count, ok := payloadMap["count"].(float64); ok {
+		fetchResp.Count = int(count)
+	}
+
+	if messagesArray, ok := payloadMap["messages"].([]interface{}); ok {
+		for _, msgInterface := range messagesArray {
+			msgMap, ok := msgInterface.(map[string]interface{})
+			if !ok {
+				continue
+			}
+
+			event := FetchResponseEvent{}
+
+			if subID, ok := msgMap["subscription_id"].(string); ok {
+				event.SubscriptionID = subID
+			}
+			if partID, ok := msgMap["partition_id"].(string); ok {
+				event.PartitionID = partID
+			}
+			if offset, ok := msgMap["offset"].(float64); ok {
+				event.Offset = int(offset)
+			}
+
+			// Extract message object
+			if messageMap, ok := msgMap["message"].(map[string]interface{}); ok {
+				msg := Message{}
+
+				if id, ok := messageMap["id"].(string); ok {
+					msg.ID = id
+				}
+				if topic, ok := messageMap["topic"].(string); ok {
+					msg.Topic = topic
+				}
+				if content, ok := messageMap["content"].(string); ok {
+					msg.Content = content
+				}
+
+				// Store offset and partition in message for convenience
+				msg.Offset = event.Offset
+				msg.PartitionID = event.PartitionID
+
+				if targetType, ok := messageMap["target_type"].(string); ok {
+					msg.TargetType = &targetType
+				}
+				if targetID, ok := messageMap["target_id"].(string); ok {
+					msg.TargetID = &targetID
+				}
+				if traceID, ok := messageMap["trace_id"].(string); ok {
+					msg.TraceID = &traceID
+				}
+				if orgID, ok := messageMap["org_id"].(string); ok {
+					msg.OrgID = &orgID
+				}
+
+				event.Message = msg
+			}
+
+			fetchResp.Messages = append(fetchResp.Messages, event)
+		}
+	}
+
+	return WFFetchResponse{
+		WebsocketFrame: *wf,
+		Payload:        fetchResp,
+	}
+}

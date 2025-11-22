@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -21,6 +22,8 @@ const (
 	MessageTypeEvent         = "event"
 	MessageTypeEventAck      = "event_ack"
 	MessageTypeCommitOffset  = "commit_offset"
+	MessageTypeFetch         = "fetch"
+	MessageTypeFetchResp     = "fetch_response"
 )
 
 type EventClientOpts struct {
@@ -36,16 +39,21 @@ type EventClient interface {
 }
 
 type Client struct {
-	opts             EventClientOpts
-	commitInterval   time.Duration
-	conn             *websocket.Conn
-	subscriptions    map[string]Subscription // topic, subscription
-	incomingMsgChan  chan Message
-	offsetTracker    map[string]int                        // partition_id -> last processed message offset
-	lastCommittedOff map[string]int                        // partition_id -> last committed offset
-	ackChans         map[string]chan AppendMessageResponse // topic -> ack channel
-	rawMsgChan       chan WebsocketFrame                   // for verbose mode
-	verbose          bool
+	opts              EventClientOpts
+	commitInterval    time.Duration
+	conn              *websocket.Conn
+	writeMu           sync.Mutex              // protects WebSocket writes
+	subscriptions     map[string]Subscription // topic, subscription
+	incomingMsgChan   chan Message
+	offsetTracker     map[string]int                        // partition_id -> last processed message offset
+	lastCommittedOff  map[string]int                        // partition_id -> last committed offset
+	ackChans          map[string]chan AppendMessageResponse // topic -> ack channel
+	rawMsgChan        chan WebsocketFrame                   // for verbose mode
+	verbose           bool
+	pollingCtx        context.Context
+	pollingCancel     context.CancelFunc
+	fetchTrigger      chan struct{} // signals when to start fetching
+	fetchResponseChan chan struct{} // signals when fetch response is received
 }
 
 func NewEventClient(opts EventClientOpts) *Client {
@@ -55,15 +63,17 @@ func NewEventClient(opts EventClientOpts) *Client {
 	}
 	opts.CommitInterval = cInterval.String()
 	return &Client{
-		opts:             opts,
-		commitInterval:   cInterval,
-		incomingMsgChan:  make(chan Message, 100),
-		subscriptions:    make(map[string]Subscription),
-		offsetTracker:    make(map[string]int),
-		lastCommittedOff: make(map[string]int),
-		ackChans:         make(map[string]chan AppendMessageResponse),
-		rawMsgChan:       make(chan WebsocketFrame, 100),
-		verbose:          false,
+		opts:              opts,
+		commitInterval:    cInterval,
+		incomingMsgChan:   make(chan Message, 100),
+		subscriptions:     make(map[string]Subscription),
+		offsetTracker:     make(map[string]int),
+		lastCommittedOff:  make(map[string]int),
+		ackChans:          make(map[string]chan AppendMessageResponse),
+		rawMsgChan:        make(chan WebsocketFrame, 100),
+		verbose:           false,
+		fetchTrigger:      make(chan struct{}, 1),
+		fetchResponseChan: make(chan struct{}, 1),
 	}
 }
 
@@ -86,7 +96,10 @@ func (ec *Client) Connect(ctx context.Context, startingSubs *[]SubscriptionReque
 		logger.Debug("setting up initial subscriptions", "subs", startingSubs)
 		for _, subReq := range *startingSubs {
 			wfSubReq := NewWebsocketFramedSubscriptionReq(subReq)
-			if err := ec.conn.WriteJSON(wfSubReq); err != nil {
+			ec.writeMu.Lock()
+			err := ec.conn.WriteJSON(wfSubReq)
+			ec.writeMu.Unlock()
+			if err != nil {
 				return fmt.Errorf("failed to send subscription request: %w", err)
 			}
 			ec.subscriptions[subReq.Topic] = Subscription{
@@ -98,6 +111,10 @@ func (ec *Client) Connect(ctx context.Context, startingSubs *[]SubscriptionReque
 
 	// start offset commit manager
 	go ec.OffsetManager(ctx)
+
+	// start polling loop for fetch requests
+	ec.pollingCtx, ec.pollingCancel = context.WithCancel(ctx)
+	go ec.PollingLoop(ec.pollingCtx)
 
 	return nil
 }
@@ -126,7 +143,10 @@ func (ec *Client) Subscribe(ctx context.Context, subReq SubscriptionRequest) err
 	}
 
 	wfSubReq := NewWebsocketFramedSubscriptionReq(subReq)
-	if err := ec.conn.WriteJSON(wfSubReq); err != nil {
+	ec.writeMu.Lock()
+	err := ec.conn.WriteJSON(wfSubReq)
+	ec.writeMu.Unlock()
+	if err != nil {
 		return fmt.Errorf("failed to send subscription request: %w", err)
 	}
 
@@ -136,6 +156,13 @@ func (ec *Client) Subscribe(ctx context.Context, subReq SubscriptionRequest) err
 	}
 
 	logger.Debug("sent subscription request", "topic", subReq.Topic)
+
+	// Trigger polling to start if this is the first subscription
+	select {
+	case ec.fetchTrigger <- struct{}{}:
+	default:
+	}
+
 	return nil
 }
 
@@ -214,6 +241,67 @@ func (ec *Client) processMessage(wfMsg WebsocketFrame) {
 		} else {
 			logger.Warn("received subscription response for unknown topic", "topic", subResp.Topic)
 		}
+	case MessageTypeFetchResp:
+		// Parse the fetch response to extract events
+		wfFetchResp := wfMsg.ToFetchResponse()
+		fetchPayload := wfFetchResp.Payload
+
+		logger.Debug("received fetch response", "message_count", fetchPayload.Count)
+
+		// Process each event in the response
+		for _, event := range fetchPayload.Messages {
+			msg := event.Message
+
+			// Track offset for consumed messages per partition
+			if event.Offset >= 0 && event.PartitionID != "" {
+				ec.offsetTracker[event.PartitionID] = event.Offset
+				logger.Debug("tracked consumed message offset", "topic", msg.Topic, "partition", event.PartitionID, "offset", event.Offset)
+			}
+
+			// Send message to incoming channel
+			select {
+			case ec.incomingMsgChan <- msg:
+			default:
+				logger.Warn("incoming message channel full, dropping message")
+			}
+
+			// CRITICAL: Commit offset immediately after processing each message
+			// This prevents receiving the same message again
+			if event.SubscriptionID != "" && event.PartitionID != "" && event.Offset >= 0 {
+				nextOffset := event.Offset + 1 // Next offset to read
+				commitMsg := WFOffsetCommitMsg{
+					WebsocketFrame: WebsocketFrame{
+						MessageType: MessageTypeCommitOffset,
+						Version:     "1.0",
+					},
+					Payload: OffsetCommitMsg{
+						SubscriptionID: event.SubscriptionID,
+						PartitionID:    event.PartitionID,
+						GroupID:        ec.opts.GroupID,
+						Offset:         nextOffset,
+					},
+				}
+
+				ec.writeMu.Lock()
+				err := ec.conn.WriteJSON(commitMsg)
+				ec.writeMu.Unlock()
+
+				if err != nil {
+					logger.Error("failed to commit offset after processing message", "partition", event.PartitionID, "offset", nextOffset, "error", err)
+				} else {
+					ec.lastCommittedOff[event.PartitionID] = nextOffset
+					logger.Debug("committed offset immediately after processing", "partition", event.PartitionID, "committed_offset", nextOffset)
+				}
+			}
+		}
+
+		// Signal that we received a fetch response so polling loop can continue
+		select {
+		case ec.fetchResponseChan <- struct{}{}:
+		default:
+			// Channel already has a signal, no need to add another
+		}
+
 	default:
 		logger.Debug("unknown message type", "messageType", wfMsg.MessageType, "message", wfMsg)
 	}
@@ -242,7 +330,10 @@ func (ec *Client) Publish(
 	}()
 
 	// Send message (non-blocking write)
-	if err := ec.conn.WriteJSON(wfMsg); err != nil {
+	ec.writeMu.Lock()
+	err := ec.conn.WriteJSON(wfMsg)
+	ec.writeMu.Unlock()
+	if err != nil {
 		return nil, fmt.Errorf("failed to publish message: %w", err)
 	}
 
@@ -281,6 +372,9 @@ func (ec *Client) CommitOffsets(ctx context.Context) error {
 			continue
 		}
 
+		// Commit offset + 1 (the next offset to read, not the one we just read)
+		nextOffset := offset + 1
+
 		msg := WFOffsetCommitMsg{
 			WebsocketFrame: WebsocketFrame{
 				MessageType: MessageTypeCommitOffset,
@@ -290,16 +384,19 @@ func (ec *Client) CommitOffsets(ctx context.Context) error {
 				SubscriptionID: subscriptionID,
 				PartitionID:    partitionID,
 				GroupID:        ec.opts.GroupID,
-				Offset:         offset,
+				Offset:         nextOffset,
 			},
 		}
-		if err := ec.conn.WriteJSON(msg); err != nil {
+		ec.writeMu.Lock()
+		err := ec.conn.WriteJSON(msg)
+		ec.writeMu.Unlock()
+		if err != nil {
 			return fmt.Errorf("failed to commit offset for partition %s: %w", partitionID, err)
 		}
 
 		// Update last committed offset
-		ec.lastCommittedOff[partitionID] = offset
-		logger.Debug("offset committed", "partition", partitionID, "offset", offset)
+		ec.lastCommittedOff[partitionID] = nextOffset
+		logger.Debug("offset committed (periodic)", "partition", partitionID, "committed_offset", nextOffset)
 	}
 	return nil
 }
@@ -317,4 +414,75 @@ func (ec *Client) OffsetManager(ctx context.Context) {
 			return
 		}
 	}
+}
+
+// PollingLoop continuously sends fetch requests using long polling
+// The server holds each request for up to 5 seconds, providing near-instant
+// message delivery when available while minimizing network overhead
+func (ec *Client) PollingLoop(ctx context.Context) {
+	// Wait for first subscription before starting to poll
+	select {
+	case <-ec.fetchTrigger:
+		logger.Debug("polling loop activated")
+	case <-ctx.Done():
+		return
+	}
+
+	// Continuous long polling loop - no delays between requests
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+			// Only send fetch if we have active subscriptions
+			if len(ec.subscriptions) == 0 {
+				// Wait for a subscription to be added
+				select {
+				case <-ec.fetchTrigger:
+				case <-ctx.Done():
+					return
+				}
+				continue
+			}
+
+			// Send fetch request - server will hold for up to 5 seconds
+			if err := ec.sendFetchRequest(); err != nil {
+				logger.Error("failed to send fetch request", "error", err)
+				// Brief delay on error to avoid tight error loop
+				time.Sleep(time.Second)
+				continue
+			}
+
+			// Wait for fetch response before sending next request
+			// This prevents flooding the server with requests
+			select {
+			case <-ec.fetchResponseChan:
+				// Got response, add minimum 100ms delay as required by server rate limiting
+				time.Sleep(100 * time.Millisecond)
+				// Loop will send next fetch
+			case <-ctx.Done():
+				return
+			}
+		}
+	}
+}
+
+// sendFetchRequest sends a fetch message to pull new messages for all subscriptions
+// Server will hold the request for up to 5 seconds (long polling)
+func (ec *Client) sendFetchRequest() error {
+	fetchMsg := WebsocketFrame{
+		MessageType: MessageTypeFetch,
+		Version:     "1.0",
+		Payload:     nil,
+	}
+
+	ec.writeMu.Lock()
+	err := ec.conn.WriteJSON(fetchMsg)
+	ec.writeMu.Unlock()
+	if err != nil {
+		return fmt.Errorf("failed to send fetch request: %w", err)
+	}
+
+	logger.Debug("sent long polling fetch request")
+	return nil
 }

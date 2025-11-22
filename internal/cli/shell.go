@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"bufio"
 	"context"
 	"fmt"
 	"os"
@@ -11,6 +10,7 @@ import (
 
 	"github.com/ambientlabscomputing/event_bus_client"
 	"github.com/fatih/color"
+	"github.com/peterh/liner"
 	"github.com/spf13/cobra"
 )
 
@@ -23,6 +23,14 @@ var shellCmd = &cobra.Command{
 
 func init() {
 	rootCmd.AddCommand(shellCmd)
+}
+
+func getHistoryFilePath() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ".eventbus_history"
+	}
+	return fmt.Sprintf("%s/.eventbus_cli/history", home)
 }
 
 type Shell struct {
@@ -127,9 +135,21 @@ func (s *Shell) listenForRawMessages() {
 }
 
 func (s *Shell) repl() {
-	reader := bufio.NewReader(os.Stdin)
 	color.White("\nEventBus Interactive Shell")
-	color.White("Commands: subscribe, publish, list, verbose, help, exit\n")
+	color.White("Commands: subscribe, publish, list, verbose, help, exit")
+	color.White("Use ↑/↓ arrows for command history\n")
+
+	line := liner.NewLiner()
+	defer line.Close()
+
+	line.SetCtrlCAborts(true)
+
+	// Load history from file
+	historyFile := getHistoryFilePath()
+	if f, err := os.Open(historyFile); err == nil {
+		line.ReadHistory(f)
+		f.Close()
+	}
 
 	for {
 		select {
@@ -138,18 +158,30 @@ func (s *Shell) repl() {
 		default:
 		}
 
-		fmt.Print(color.GreenString("eventbus> "))
-		line, err := reader.ReadString('\n')
+		input, err := line.Prompt("eventbus> ")
 		if err != nil {
+			// Save history before exiting
+			if f, err := os.Create(getHistoryFilePath()); err == nil {
+				line.WriteHistory(f)
+				f.Close()
+			}
+			if err == liner.ErrPromptAborted {
+				color.Yellow("\nGoodbye!")
+			} else {
+				color.Red("\nError reading input: %v", err)
+			}
+			s.cancel()
 			return
 		}
 
-		line = strings.TrimSpace(line)
-		if line == "" {
+		input = strings.TrimSpace(input)
+		if input == "" {
 			continue
 		}
 
-		parts := strings.Fields(line)
+		line.AppendHistory(input)
+
+		parts := strings.Fields(input)
 		if len(parts) == 0 {
 			continue
 		}
@@ -169,6 +201,11 @@ func (s *Shell) repl() {
 		case "help", "h":
 			s.handleHelp()
 		case "exit", "quit", "q":
+			// Save history before exiting
+			if f, err := os.Create(getHistoryFilePath()); err == nil {
+				line.WriteHistory(f)
+				f.Close()
+			}
 			color.Yellow("Goodbye!")
 			s.cancel()
 			return

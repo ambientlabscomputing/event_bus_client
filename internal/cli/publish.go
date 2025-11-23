@@ -18,6 +18,12 @@ var publishCmd = &cobra.Command{
 
 func init() {
 	rootCmd.AddCommand(publishCmd)
+
+	// Add message metadata flags
+	publishCmd.Flags().String("trace-id", "", "Trace ID for the message")
+	publishCmd.Flags().String("org-id", "", "Organization ID for the message")
+	publishCmd.Flags().String("target-type", "", "Target type for the message")
+	publishCmd.Flags().String("target-id", "", "Target ID for the message")
 }
 
 func runPublish(cmd *cobra.Command, args []string) error {
@@ -44,7 +50,22 @@ func runPublish(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to connect: %w", err)
 	}
 
-	ack, err := client.Publish(ctx, topic, content, nil, nil, nil)
+	// Get optional metadata flags
+	var traceID, orgID, targetType, targetID *string
+	if val, _ := cmd.Flags().GetString("trace-id"); val != "" {
+		traceID = &val
+	}
+	if val, _ := cmd.Flags().GetString("org-id"); val != "" {
+		orgID = &val
+	}
+	if val, _ := cmd.Flags().GetString("target-type"); val != "" {
+		targetType = &val
+	}
+	if val, _ := cmd.Flags().GetString("target-id"); val != "" {
+		targetID = &val
+	}
+
+	ack, err := client.Publish(ctx, topic, content, targetType, targetID, traceID, orgID)
 	if err != nil {
 		color.Red("✗ Failed to publish: %v", err)
 		return fmt.Errorf("failed to publish: %w", err)

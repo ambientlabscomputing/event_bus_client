@@ -310,7 +310,7 @@ func (ec *Client) processMessage(wfMsg WebsocketFrame) {
 func (ec *Client) Publish(
 	ctx context.Context,
 	topic, content string,
-	targetType, targetID, traceID *string,
+	targetType, targetID, traceID, orgID *string,
 ) (*AppendMessageResponse, error) {
 	msg := Message{
 		Topic:      topic,
@@ -318,6 +318,7 @@ func (ec *Client) Publish(
 		TargetType: targetType,
 		TargetID:   targetID,
 		TraceID:    traceID,
+		OrgID:      orgID,
 	}
 	wfMsg := NewWebsocketFramedMessage(msg)
 

@@ -20,6 +20,12 @@ var subscribeCmd = &cobra.Command{
 
 func init() {
 	rootCmd.AddCommand(subscribeCmd)
+
+	// Add filter flags for subscribing
+	subscribeCmd.Flags().String("trace-id", "", "Filter messages by trace ID")
+	subscribeCmd.Flags().String("org-id", "", "Filter messages by organization ID")
+	subscribeCmd.Flags().String("target-type", "", "Filter messages by target type")
+	subscribeCmd.Flags().String("target-id", "", "Filter messages by target ID")
 }
 
 func runSubscribe(cmd *cobra.Command, args []string) error {

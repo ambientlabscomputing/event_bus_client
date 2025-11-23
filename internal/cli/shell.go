@@ -271,7 +271,7 @@ func (s *Shell) handlePublish(args []string) {
 		color.Magenta("Publishing to topic '%s' with content: %s", topic, content)
 	}
 
-	ack, err := s.client.Publish(s.ctx, topic, content, nil, nil, nil)
+	ack, err := s.client.Publish(s.ctx, topic, content, nil, nil, nil, nil)
 	if err != nil {
 		color.Red("✗ Failed to publish: %v", err)
 		return

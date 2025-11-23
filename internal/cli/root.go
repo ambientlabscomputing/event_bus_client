@@ -27,18 +27,32 @@ func init() {
 	cobra.OnInitialize(initConfig)
 
 	// Global flags can be added here
+	rootCmd.PersistentFlags().StringP("config-file", "c", "", "Path to config file (default: ~/.eventbus_cli/config.yaml)")
 	rootCmd.PersistentFlags().String("endpoint", "", "Event bus endpoint URL")
 	rootCmd.PersistentFlags().String("token", "", "Authentication token")
 	rootCmd.PersistentFlags().String("group-id", "", "Consumer group ID")
 
 	// Bind flags to viper (flags override config file)
+	viper.BindPFlag("config_file", rootCmd.PersistentFlags().Lookup("config-file"))
 	viper.BindPFlag("endpoint", rootCmd.PersistentFlags().Lookup("endpoint"))
 	viper.BindPFlag("token", rootCmd.PersistentFlags().Lookup("token"))
 	viper.BindPFlag("group_id", rootCmd.PersistentFlags().Lookup("group-id"))
 }
 
 func initConfig() {
-	// Get config directory
+	// Check if a custom config file was specified
+	configFile := viper.GetString("config_file")
+
+	if configFile != "" {
+		// Use the specified config file
+		viper.SetConfigFile(configFile)
+		if err := viper.ReadInConfig(); err != nil {
+			fmt.Fprintf(os.Stderr, "Error reading config file %s: %v\n", configFile, err)
+		}
+		return
+	}
+
+	// Use default config file location
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		return

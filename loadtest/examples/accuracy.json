@@ -1,0 +1,129 @@
+{
+  "test_name": "accuracy_test_target_filtering",
+  "event_bus": {
+    "endpoint": "ws://localhost:9000/ws",
+    "token": "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6InM1RzkwR05JVFc5RnRsdVAyaXZsUiJ9.eyJpc3MiOiJodHRwczovL2Rldi1tb3RrOGd4Nnd5dzdubWJyLnVzLmF1dGgwLmNvbS8iLCJzdWIiOiJhdXRoMHw2OGZkYjVhZmYyZGQwMWNkMTE1MDAwODUiLCJhdWQiOiJodHRwczovL3NlcnZlcmFwaS5hbWJpZW50bGFicy5pbyIsImlhdCI6MTc2Mzk1ODk0OCwiZXhwIjoxNzY0MDQ1MzQ4LCJzY29wZSI6InJlYWQ6ZXZlbnRzIiwiZ3R5IjoicGFzc3dvcmQiLCJhenAiOiJLMnVMNHFjNGNSV0ZIREZySEdhVnRleDhTYk1vSGY4aCJ9.PnDGPwAHZjzJWjxW9Jr6_CoyjlDEgo-CVMEuqolG-Xxk-Eeteq-1AOEYNoQjzY1EG2C5JvJr7uCqgZe2C4_kcHOsvBJO5JZlrMT3254Wl2sfu94j5VOGPwQIKBHCx5u7xprgR_Q2j_aZKG70m4z7q0zxJoSlIEyJ5MsCv5BDELLHdwceBLV7Q8bg47JGwxXDe600SNypeQdnviCyQHrOOynFahFntHacG-zklg776SonD-HHcnX3ZTImi1EKdQp6i5mwfzgEa0LV5zv_C4wTgcuaznMtitF4TfKZRxxlBZ4vnuUahfwPRJOXkNbQkB41iF_Y6Lj9J8M9EieWwT6u2A"
+  },
+  "duration": "1m",
+  "report_interval": "10s",
+  "ramp_up": "5s",
+  "scenarios": [
+    {
+      "name": "publish_user_123_messages",
+      "type": "publisher",
+      "instances": 1,
+      "topic": "accuracy_test_topic",
+      "group_id": "accuracy_pub_user123",
+      "publish_config": {
+        "messages_per_second": 2,
+        "message_size": 128,
+        "batch_size": 1,
+        "message_pattern": "random",
+        "include_target_fields": true
+      },
+      "metadata": {
+        "target_type": "user",
+        "target_id": "user-123"
+      }
+    },
+    {
+      "name": "publish_org_456_messages",
+      "type": "publisher",
+      "instances": 1,
+      "topic": "accuracy_test_topic",
+      "group_id": "accuracy_pub_org456",
+      "publish_config": {
+        "messages_per_second": 2,
+        "message_size": 128,
+        "batch_size": 1,
+        "message_pattern": "random",
+        "include_target_fields": true
+      },
+      "metadata": {
+        "target_type": "organization",
+        "target_id": "org-456"
+      }
+    },
+    {
+      "name": "publish_user_789_messages",
+      "type": "publisher",
+      "instances": 1,
+      "topic": "accuracy_test_topic",
+      "group_id": "accuracy_pub_user789",
+      "publish_config": {
+        "messages_per_second": 2,
+        "message_size": 128,
+        "batch_size": 1,
+        "message_pattern": "random",
+        "include_target_fields": true
+      },
+      "metadata": {
+        "target_type": "user",
+        "target_id": "user-789"
+      }
+    },
+    {
+      "name": "publish_no_target_messages",
+      "type": "publisher",
+      "instances": 1,
+      "topic": "accuracy_test_topic",
+      "group_id": "accuracy_pub_notarget",
+      "publish_config": {
+        "messages_per_second": 2,
+        "message_size": 128,
+        "batch_size": 1,
+        "message_pattern": "random",
+        "include_target_fields": false
+      }
+    },
+    {
+      "name": "subscribe_user_type_only",
+      "type": "subscriber",
+      "instances": 1,
+      "topic": "accuracy_test_topic",
+      "group_id": "accuracy_filter_user_type",
+      "target_filters": {
+        "target_type": "user"
+      }
+    },
+    {
+      "name": "subscribe_org_type_only",
+      "type": "subscriber",
+      "instances": 1,
+      "topic": "accuracy_test_topic",
+      "group_id": "accuracy_filter_org_type",
+      "target_filters": {
+        "target_type": "organization"
+      }
+    },
+    {
+      "name": "subscribe_user_123_exact",
+      "type": "subscriber",
+      "instances": 1,
+      "topic": "accuracy_test_topic",
+      "group_id": "accuracy_filter_user123_exact",
+      "target_filters": {
+        "target_type": "user",
+        "target_id": "user-123"
+      }
+    },
+    {
+      "name": "subscribe_user_789_exact",
+      "type": "subscriber",
+      "instances": 1,
+      "topic": "accuracy_test_topic",
+      "group_id": "accuracy_filter_user789_exact",
+      "target_filters": {
+        "target_type": "user",
+        "target_id": "user-789"
+      }
+    },
+    {
+      "name": "subscribe_all_no_filter",
+      "type": "subscriber",
+      "instances": 1,
+      "topic": "accuracy_test_topic",
+      "group_id": "accuracy_no_filter"
+    }
+  ]
+}

@@ -184,5 +184,15 @@ func buildSubscribeCommand(cliPath string, config *LoadTestConfig, scenario *Sce
 		"--group-id", uniqueGroupID,
 	}
 
+	// Add target field filters if specified
+	if scenario.TargetFilters != nil {
+		if scenario.TargetFilters.TargetType != "" {
+			args = append(args, "--target-type", scenario.TargetFilters.TargetType)
+		}
+		if scenario.TargetFilters.TargetID != "" {
+			args = append(args, "--target-id", scenario.TargetFilters.TargetID)
+		}
+	}
+
 	return exec.Command(cliPath, args...)
 }

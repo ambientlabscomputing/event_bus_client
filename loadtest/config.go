@@ -32,6 +32,7 @@ type Scenario struct {
 	GroupID       string           `json:"group_id"`
 	PublishConfig *PublishConfig   `json:"publish_config,omitempty"`
 	Metadata      *MessageMetadata `json:"metadata,omitempty"`
+	TargetFilters *TargetFilters   `json:"target_filters,omitempty"` // For subscriber filtering
 }
 
 // PublishConfig defines publishing behavior
@@ -47,6 +48,12 @@ type PublishConfig struct {
 type MessageMetadata struct {
 	TraceID    string `json:"trace_id,omitempty"`
 	OrgID      string `json:"org_id,omitempty"`
+	TargetType string `json:"target_type,omitempty"`
+	TargetID   string `json:"target_id,omitempty"`
+}
+
+// TargetFilters defines subscriber filtering criteria
+type TargetFilters struct {
 	TargetType string `json:"target_type,omitempty"`
 	TargetID   string `json:"target_id,omitempty"`
 }

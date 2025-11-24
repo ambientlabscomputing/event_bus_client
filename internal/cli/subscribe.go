@@ -49,12 +49,32 @@ func runSubscribe(cmd *cobra.Command, args []string) error {
 	client := event_bus_client.NewEventClient(opts)
 	color.White("client initialized")
 
-	subs := []event_bus_client.SubscriptionRequest{
-		{
-			GroupID: groupID,
-			Topic:   topic,
-		},
+	// Parse filter flags
+	traceID, _ := cmd.Flags().GetString("trace-id")
+	orgID, _ := cmd.Flags().GetString("org-id")
+	targetType, _ := cmd.Flags().GetString("target-type")
+	targetID, _ := cmd.Flags().GetString("target-id")
+
+	// Build subscription request with filters
+	subReq := event_bus_client.SubscriptionRequest{
+		GroupID: groupID,
+		Topic:   topic,
 	}
+
+	if traceID != "" {
+		subReq.TraceID = &traceID
+	}
+	if orgID != "" {
+		subReq.OrgID = &orgID
+	}
+	if targetType != "" {
+		subReq.TargetType = &targetType
+	}
+	if targetID != "" {
+		subReq.TargetID = &targetID
+	}
+
+	subs := []event_bus_client.SubscriptionRequest{subReq}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

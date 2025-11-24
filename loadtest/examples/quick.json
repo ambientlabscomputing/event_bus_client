@@ -1,0 +1,29 @@
+{
+  "test_name": "quick_test",
+  "event_bus": {
+    "endpoint": "ws://localhost:9000/ws",
+    "token": "YOUR_TOKEN_HERE"
+  },
+  "duration": "30s",
+  "report_interval": "5s",
+  "scenarios": [
+    {
+      "name": "simple_publishers",
+      "type": "publisher",
+      "instances": 5,
+      "topic": "quick_test_topic",
+      "group_id": "quick_test_group",
+      "publish_config": {
+        "messages_per_second": 5,
+        "message_size": 128,
+        "batch_size": 1,
+        "message_pattern": "random",
+        "include_target_fields": false
+      },
+      "metadata": {
+        "trace_id": "quick-test",
+        "org_id": "test-org"
+      }
+    }
+  ]
+}

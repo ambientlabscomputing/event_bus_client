@@ -1,0 +1,57 @@
+{
+  "test_name": "basic_load_test",
+  "event_bus": {
+    "endpoint": "ws://localhost:9000/ws",
+    "token": "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6InM1RzkwR05JVFc5RnRsdVAyaXZsUiJ9.eyJpc3MiOiJodHRwczovL2Rldi1tb3RrOGd4Nnd5dzdubWJyLnVzLmF1dGgwLmNvbS8iLCJzdWIiOiJhdXRoMHw2OGZkYjVhZmYyZGQwMWNkMTE1MDAwODUiLCJhdWQiOiJodHRwczovL3NlcnZlcmFwaS5hbWJpZW50bGFicy5pbyIsImlhdCI6MTc2Mzk1ODk0OCwiZXhwIjoxNzY0MDQ1MzQ4LCJzY29wZSI6InJlYWQ6ZXZlbnRzIiwiZ3R5IjoicGFzc3dvcmQiLCJhenAiOiJLMnVMNHFjNGNSV0ZIREZySEdhVnRleDhTYk1vSGY4aCJ9.PnDGPwAHZjzJWjxW9Jr6_CoyjlDEgo-CVMEuqolG-Xxk-Eeteq-1AOEYNoQjzY1EG2C5JvJr7uCqgZe2C4_kcHOsvBJO5JZlrMT3254Wl2sfu94j5VOGPwQIKBHCx5u7xprgR_Q2j_aZKG70m4z7q0zxJoSlIEyJ5MsCv5BDELLHdwceBLV7Q8bg47JGwxXDe600SNypeQdnviCyQHrOOynFahFntHacG-zklg776SonD-HHcnX3ZTImi1EKdQp6i5mwfzgEa0LV5zv_C4wTgcuaznMtitF4TfKZRxxlBZ4vnuUahfwPRJOXkNbQkB41iF_Y6Lj9J8M9EieWwT6u2A"
+  },
+  "duration": "2m",
+  "report_interval": "10s",
+  "ramp_up": "10s",
+  "scenarios": [
+    {
+      "name": "publishers_without_target_fields",
+      "type": "publisher",
+      "instances": 10,
+      "topic": "load_test_topic",
+      "group_id": "load_test_group_1",
+      "publish_config": {
+        "messages_per_second": 10,
+        "message_size": 256,
+        "batch_size": 1,
+        "message_pattern": "random",
+        "include_target_fields": false
+      },
+      "metadata": {
+        "trace_id": "test-trace-1",
+        "org_id": "test-org-1"
+      }
+    },
+    {
+      "name": "publishers_with_target_fields",
+      "type": "publisher",
+      "instances": 10,
+      "topic": "load_test_topic",
+      "group_id": "load_test_group_2",
+      "publish_config": {
+        "messages_per_second": 10,
+        "message_size": 256,
+        "batch_size": 1,
+        "message_pattern": "random",
+        "include_target_fields": true
+      },
+      "metadata": {
+        "trace_id": "test-trace-2",
+        "org_id": "test-org-2",
+        "target_type": "user",
+        "target_id": "user-123"
+      }
+    },
+    {
+      "name": "subscribers",
+      "type": "subscriber",
+      "instances": 5,
+      "topic": "load_test_topic",
+      "group_id": "load_test_subscribers"
+    }
+  ]
+}

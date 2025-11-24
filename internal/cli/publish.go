@@ -46,9 +46,7 @@ func runPublish(cmd *cobra.Command, args []string) error {
 	client := event_bus_client.NewEventClient(opts)
 
 	ctx := context.Background()
-	if err := client.Connect(ctx, nil); err != nil {
-		return fmt.Errorf("failed to connect: %w", err)
-	}
+	// Note: Publish now uses HTTP POST, no WebSocket connection needed
 
 	// Get optional metadata flags
 	var traceID, orgID, targetType, targetID *string

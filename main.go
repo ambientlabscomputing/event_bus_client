@@ -1,9 +1,14 @@
 package event_bus_client
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
+	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -42,7 +47,9 @@ type Client struct {
 	opts              EventClientOpts
 	commitInterval    time.Duration
 	conn              *websocket.Conn
+	httpClient        *http.Client            // for HTTP POST publishing
 	writeMu           sync.Mutex              // protects WebSocket writes
+	ackMu             sync.Mutex              // protects ackChans map
 	subscriptions     map[string]Subscription // topic, subscription
 	incomingMsgChan   chan Message
 	offsetTracker     map[string]int                        // partition_id -> last processed message offset
@@ -56,6 +63,31 @@ type Client struct {
 	fetchResponseChan chan struct{} // signals when fetch response is received
 }
 
+// buildWebSocketURL constructs the WebSocket endpoint from base endpoint
+func (ec *Client) buildWebSocketURL() string {
+	endpoint := strings.TrimSuffix(ec.opts.Endpoint, "/")
+	// Remove /ws or /api suffix if present
+	endpoint = strings.TrimSuffix(endpoint, "/ws")
+	endpoint = strings.TrimSuffix(endpoint, "/api")
+	return endpoint + "/ws"
+}
+
+// buildHTTPBaseURL constructs the HTTP base URL from WebSocket or base endpoint
+func (ec *Client) buildHTTPBaseURL() string {
+	endpoint := strings.TrimSuffix(ec.opts.Endpoint, "/")
+	// Remove /ws or /api suffix if present
+	endpoint = strings.TrimSuffix(endpoint, "/ws")
+	endpoint = strings.TrimSuffix(endpoint, "/api")
+
+	// Convert ws:// to http:// or wss:// to https://
+	if strings.HasPrefix(endpoint, "ws://") {
+		endpoint = "http://" + strings.TrimPrefix(endpoint, "ws://")
+	} else if strings.HasPrefix(endpoint, "wss://") {
+		endpoint = "https://" + strings.TrimPrefix(endpoint, "wss://")
+	}
+	return endpoint
+}
+
 func NewEventClient(opts EventClientOpts) *Client {
 	cInterval, err := time.ParseDuration(opts.CommitInterval)
 	if err != nil {
@@ -63,8 +95,16 @@ func NewEventClient(opts EventClientOpts) *Client {
 	}
 	opts.CommitInterval = cInterval.String()
 	return &Client{
-		opts:              opts,
-		commitInterval:    cInterval,
+		opts:           opts,
+		commitInterval: cInterval,
+		httpClient: &http.Client{
+			Timeout: 10 * time.Second,
+			Transport: &http.Transport{
+				MaxIdleConns:        100,
+				MaxIdleConnsPerHost: 100,
+				IdleConnTimeout:     90 * time.Second,
+			},
+		},
 		incomingMsgChan:   make(chan Message, 100),
 		subscriptions:     make(map[string]Subscription),
 		offsetTracker:     make(map[string]int),
@@ -81,7 +121,9 @@ func NewEventClient(opts EventClientOpts) *Client {
 // and sets up initial subscriptions if provided.
 func (ec *Client) Connect(ctx context.Context, startingSubs *[]SubscriptionRequest) error {
 	// start websocket connection
-	connectionURL := fmt.Sprintf("%s?token=%s", ec.opts.Endpoint, ec.opts.AuthToken)
+	// Build WebSocket URL: append /ws to base endpoint
+	wsEndpoint := ec.buildWebSocketURL()
+	connectionURL := fmt.Sprintf("%s?token=%s", wsEndpoint, ec.opts.AuthToken)
 	logger.Debug("connection URL", "connURL", connectionURL)
 	conn, _, err := websocket.DefaultDialer.DialContext(ctx, connectionURL, nil)
 	if err != nil {
@@ -106,6 +148,14 @@ func (ec *Client) Connect(ctx context.Context, startingSubs *[]SubscriptionReque
 				SubscriptionRequest: subReq,
 				ID:                  "", // ID will be set upon receiving subscription response
 			}
+		}
+
+		// Trigger polling loop to start fetching messages for initial subscriptions
+		select {
+		case ec.fetchTrigger <- struct{}{}:
+			logger.Debug("triggered polling loop for initial subscriptions")
+		default:
+			// Channel already has a signal
 		}
 	}
 
@@ -221,13 +271,26 @@ func (ec *Client) processMessage(wfMsg WebsocketFrame) {
 		appendMsgResp := wfMsg.ToAppendMessageResp()
 		// Don't track offset for published messages - only for consumed ones
 
+		logger.Debug("received event ack", "topic", appendMsgResp.Payload.Topic, "offset", appendMsgResp.Payload.Offset, "partition", appendMsgResp.Payload.PartitionID)
+
 		// Send to waiting publish goroutine if exists
-		if ackChan, exists := ec.ackChans[appendMsgResp.Payload.Topic]; exists {
+		ec.ackMu.Lock()
+		ackChan, exists := ec.ackChans[appendMsgResp.Payload.Topic]
+		ec.ackMu.Unlock()
+
+		if exists {
+			logger.Debug("found ack channel for topic", "topic", appendMsgResp.Payload.Topic)
 			select {
 			case ackChan <- appendMsgResp.Payload:
+				logger.Debug("sent ack to channel", "topic", appendMsgResp.Payload.Topic)
 			default:
-				// Channel might be closed or full
+				logger.Warn("ack channel full or closed", "topic", appendMsgResp.Payload.Topic)
 			}
+		} else {
+			ec.ackMu.Lock()
+			availableChannels := len(ec.ackChans)
+			ec.ackMu.Unlock()
+			logger.Warn("no ack channel found for topic", "topic", appendMsgResp.Payload.Topic, "available_channels", availableChannels)
 		}
 	case MessageTypeSubscribeResp:
 		logger.Debug("raw subscription response", "payload", wfMsg.Payload)
@@ -312,43 +375,73 @@ func (ec *Client) Publish(
 	topic, content string,
 	targetType, targetID, traceID, orgID *string,
 ) (*AppendMessageResponse, error) {
-	msg := Message{
-		Topic:      topic,
-		Content:    content,
-		TargetType: targetType,
-		TargetID:   targetID,
-		TraceID:    traceID,
-		OrgID:      orgID,
+	// Build HTTP POST request
+	reqBody := HTTPPublishRequest{
+		Topic:   topic,
+		Content: content,
 	}
-	wfMsg := NewWebsocketFramedMessage(msg)
+	if orgID != nil {
+		reqBody.OrgID = *orgID
+	}
+	if traceID != nil {
+		reqBody.TraceID = *traceID
+	}
+	if targetType != nil {
+		reqBody.TargetType = *targetType
+	}
+	if targetID != nil {
+		reqBody.TargetID = *targetID
+	}
 
-	// Create ack channel for this topic
-	ackChan := make(chan AppendMessageResponse, 1)
-	ec.ackChans[topic] = ackChan
-	defer func() {
-		delete(ec.ackChans, topic)
-		close(ackChan)
-	}()
-
-	// Send message (non-blocking write)
-	ec.writeMu.Lock()
-	err := ec.conn.WriteJSON(wfMsg)
-	ec.writeMu.Unlock()
+	bodyBytes, err := json.Marshal(reqBody)
 	if err != nil {
-		return nil, fmt.Errorf("failed to publish message: %w", err)
+		return nil, fmt.Errorf("failed to marshal publish request: %w", err)
 	}
 
-	// Wait for acknowledgment with timeout
-	ackCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
+	// Build HTTP publish URL
+	baseURL := ec.buildHTTPBaseURL()
+	publishURL := baseURL + "/api/v1/publish"
 
-	select {
-	case ack := <-ackChan:
-		logger.Debug("publish acknowledged", "offset", ack.Offset, "partition", ack.PartitionID, "topic", ack.Topic)
-		return &ack, nil
-	case <-ackCtx.Done():
-		return nil, fmt.Errorf("timeout waiting for publish acknowledgment")
+	// Create HTTP request
+	req, err := http.NewRequestWithContext(ctx, "POST", publishURL, bytes.NewReader(bodyBytes))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create publish request: %w", err)
 	}
+
+	// Set headers
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+ec.opts.AuthToken)
+
+	// Send request
+	resp, err := ec.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to send publish request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	// Read response body
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read publish response: %w", err)
+	}
+
+	// Check for 202 Accepted
+	if resp.StatusCode != http.StatusAccepted {
+		return nil, fmt.Errorf("publish failed with status %d: %s", resp.StatusCode, string(respBody))
+	}
+
+	// Parse response
+	var httpResp HTTPPublishResponse
+	if err := json.Unmarshal(respBody, &httpResp); err != nil {
+		return nil, fmt.Errorf("failed to parse publish response: %w", err)
+	}
+
+	logger.Debug("publish accepted", "topic", httpResp.Topic, "status", httpResp.Status)
+
+	// Return minimal response (HTTP publish doesn't provide offset/partition immediately)
+	return &AppendMessageResponse{
+		Topic: httpResp.Topic,
+	}, nil
 }
 
 func (ec *Client) CommitOffsets(ctx context.Context) error {

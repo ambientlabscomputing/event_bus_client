@@ -1,5 +1,22 @@
 package event_bus_client
 
+// HTTP Publishing Types
+type HTTPPublishRequest struct {
+	Topic      string `json:"topic"`
+	Content    string `json:"content"`
+	OrgID      string `json:"org_id,omitempty"`
+	TraceID    string `json:"trace_id,omitempty"`
+	TargetType string `json:"target_type,omitempty"`
+	TargetID   string `json:"target_id,omitempty"`
+}
+
+type HTTPPublishResponse struct {
+	Status  string `json:"status"`
+	Message string `json:"message"`
+	Topic   string `json:"topic"`
+}
+
+// WebSocket Types
 type WebsocketFrame struct {
 	MessageType string `json:"message_type"`
 	Version     string `json:"version"`

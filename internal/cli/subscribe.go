@@ -65,6 +65,7 @@ func runSubscribe(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to connect: %w", err)
 	}
 	color.Green("✓ Connected and subscribed successfully!")
+	fmt.Fprintf(os.Stdout, "SUBSCRIBER_READY: %s\n", topic)
 
 	// Handle interrupt signal
 	sigChan := make(chan os.Signal, 1)
@@ -81,7 +82,10 @@ func runSubscribe(cmd *cobra.Command, args []string) error {
 	for {
 		select {
 		case msg := <-incomingMsgChan:
-			color.Cyan(fmt.Sprintf("Received message: Topic=%s, Content=%s", msg.Topic, msg.Content))
+			// Print to stdout for load test parsing (unbuffered)
+			fmt.Fprintf(os.Stdout, "Received message: Topic=%s, Content=%s\n", msg.Topic, msg.Content)
+			// Also print colored version
+			color.Cyan(fmt.Sprintf("  └─ Partition=%s, Offset=%d", msg.PartitionID, msg.Offset))
 		case <-ctx.Done():
 			return nil
 		}

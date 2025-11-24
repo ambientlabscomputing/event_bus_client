@@ -1,0 +1,386 @@
+./bin/loadtest -config loadtest/examples/basic.json -cli bin/eventbus_cli
+✅ Configuration loaded successfully: loadtest/examples/basic.json
+🚀 Starting load test: basic_load_test
+Duration: 2m0s | Ramp-up: 10s
+Scenarios: 3
+
+📊 Starting scenario: publishers_without_target_fields (publisher)
+   Instances: 10 | Topic: load_test_topic
+   Publish Rate: 10 msg/s | Message Size: 256 bytes
+   Target Fields: false
+[publishers_without_target_fields instance 0] Success: message 0 published
+[publishers_without_target_fields instance 0] Success: message 1 published
+[publishers_without_target_fields instance 0] Success: message 2 published
+[publishers_without_target_fields instance 1] Success: message 0 published
+[publishers_without_target_fields instance 1] Success: message 1 published
+[publishers_without_target_fields instance 1] Success: message 2 published
+[publishers_without_target_fields instance 2] Success: message 0 published
+[publishers_without_target_fields instance 2] Success: message 1 published
+[publishers_without_target_fields instance 2] Success: message 2 published
+[publishers_without_target_fields instance 3] Success: message 0 published
+[publishers_without_target_fields instance 3] Success: message 1 published
+[publishers_without_target_fields instance 3] Success: message 2 published
+[publishers_without_target_fields instance 4] Success: message 0 published
+[publishers_without_target_fields instance 4] Success: message 1 published
+[publishers_without_target_fields instance 4] Success: message 2 published
+[publishers_without_target_fields instance 5] Success: message 0 published
+[publishers_without_target_fields instance 5] Success: message 1 published
+[publishers_without_target_fields instance 5] Success: message 2 published
+[publishers_without_target_fields instance 6] Success: message 0 published
+[publishers_without_target_fields instance 6] Success: message 1 published
+[publishers_without_target_fields instance 6] Success: message 2 published
+[publishers_without_target_fields instance 7] Success: message 0 published
+[publishers_without_target_fields instance 7] Success: message 1 published
+[publishers_without_target_fields instance 7] Success: message 2 published
+[publishers_without_target_fields instance 8] Success: message 0 published
+[publishers_without_target_fields instance 8] Success: message 1 published
+[publishers_without_target_fields instance 8] Success: message 2 published
+✅ Scenario publishers_without_target_fields started
+
+📊 Starting scenario: publishers_with_target_fields (publisher)
+   Instances: 10 | Topic: load_test_topic
+   Publish Rate: 10 msg/s | Message Size: 256 bytes
+   Target Fields: true
+[publishers_without_target_fields instance 9] Success: message 0 published
+[publishers_with_target_fields instance 0] Success: message 0 published
+[publishers_with_target_fields instance 0] Success: message 1 published
+[publishers_without_target_fields instance 9] Success: message 1 published
+[publishers_with_target_fields instance 0] Success: message 2 published
+[publishers_without_target_fields instance 9] Success: message 2 published
+[publishers_with_target_fields instance 1] Success: message 0 published
+[publishers_with_target_fields instance 1] Success: message 1 published
+[publishers_with_target_fields instance 1] Success: message 2 published
+[publishers_with_target_fields instance 2] Success: message 0 published
+[publishers_with_target_fields instance 2] Success: message 1 published
+[publishers_with_target_fields instance 2] Success: message 2 published
+[publishers_with_target_fields instance 3] Success: message 0 published
+[publishers_with_target_fields instance 3] Success: message 1 published
+[publishers_with_target_fields instance 3] Success: message 2 published
+[publishers_with_target_fields instance 4] Success: message 0 published
+[publishers_with_target_fields instance 4] Success: message 1 published
+[publishers_with_target_fields instance 4] Success: message 2 published
+[publishers_with_target_fields instance 5] Success: message 0 published
+[publishers_with_target_fields instance 5] Success: message 1 published
+[publishers_with_target_fields instance 5] Success: message 2 published
+[publishers_with_target_fields instance 6] Success: message 0 published
+[publishers_with_target_fields instance 6] Success: message 1 published
+[publishers_with_target_fields instance 6] Success: message 2 published
+[publishers_with_target_fields instance 7] Success: message 0 published
+[publishers_with_target_fields instance 7] Success: message 1 published
+[publishers_with_target_fields instance 7] Success: message 2 published
+[publishers_with_target_fields instance 8] Success: message 0 published
+[publishers_with_target_fields instance 8] Success: message 1 published
+[publishers_with_target_fields instance 8] Success: message 2 published
+✅ Scenario publishers_with_target_fields started
+
+📊 Starting scenario: subscribers (subscriber)
+   Instances: 5 | Topic: load_test_topic
+[publishers_with_target_fields instance 9] Success: message 0 published
+[publishers_with_target_fields instance 9] Success: message 1 published
+[publishers_with_target_fields instance 9] Success: message 2 published
+✅ Scenario subscribers started
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📈 Progress Report - 12:38:34
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+publishers_without_target_fields:
+  Published: 3139 msgs (87.1/s)
+  Received:  0 msgs (0.0/s)
+  Errors:    0 (0.00%)
+  Elapsed:   36.0s
+
+publishers_with_target_fields:
+  Published: 2229 msgs (61.9/s)
+  Received:  0 msgs (0.0/s)
+  Errors:    0 (0.00%)
+  Elapsed:   36.0s
+
+subscribers:
+  Published: 0 msgs (0.0/s)
+  Received:  0 msgs (0.0/s)
+  Errors:    0 (0.00%)
+  Elapsed:   36.0s
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📈 Progress Report - 12:38:44
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+publishers_without_target_fields:
+  Published: 4142 msgs (90.0/s)
+  Received:  0 msgs (0.0/s)
+  Errors:    0 (0.00%)
+  Elapsed:   46.0s
+
+publishers_with_target_fields:
+  Published: 3230 msgs (70.2/s)
+  Received:  0 msgs (0.0/s)
+  Errors:    0 (0.00%)
+  Elapsed:   46.0s
+
+subscribers:
+  Published: 0 msgs (0.0/s)
+  Received:  0 msgs (0.0/s)
+  Errors:    0 (0.00%)
+  Elapsed:   46.0s
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📈 Progress Report - 12:38:54
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+publishers_without_target_fields:
+  Published: 5136 msgs (91.7/s)
+  Received:  0 msgs (0.0/s)
+  Errors:    0 (0.00%)
+  Elapsed:   56.0s
+
+publishers_with_target_fields:
+  Published: 4229 msgs (75.5/s)
+  Received:  0 msgs (0.0/s)
+  Errors:    0 (0.00%)
+  Elapsed:   56.0s
+
+subscribers:
+  Published: 0 msgs (0.0/s)
+  Received:  0 msgs (0.0/s)
+  Errors:    0 (0.00%)
+  Elapsed:   56.0s
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📈 Progress Report - 12:39:04
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+publishers_without_target_fields:
+  Published: 6141 msgs (93.0/s)
+  Received:  0 msgs (0.0/s)
+  Errors:    0 (0.00%)
+  Elapsed:   66.0s
+
+publishers_with_target_fields:
+  Published: 5229 msgs (79.2/s)
+  Received:  0 msgs (0.0/s)
+  Errors:    0 (0.00%)
+  Elapsed:   66.0s
+
+subscribers:
+  Published: 0 msgs (0.0/s)
+  Received:  0 msgs (0.0/s)
+  Errors:    0 (0.00%)
+  Elapsed:   66.0s
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📈 Progress Report - 12:39:14
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+publishers_without_target_fields:
+  Published: 7140 msgs (93.9/s)
+  Received:  0 msgs (0.0/s)
+  Errors:    0 (0.00%)
+  Elapsed:   76.0s
+
+publishers_with_target_fields:
+  Published: 6232 msgs (82.0/s)
+  Received:  0 msgs (0.0/s)
+  Errors:    0 (0.00%)
+  Elapsed:   76.0s
+
+subscribers:
+  Published: 0 msgs (0.0/s)
+  Received:  0 msgs (0.0/s)
+  Errors:    0 (0.00%)
+  Elapsed:   76.0s
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📈 Progress Report - 12:39:24
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+publishers_without_target_fields:
+  Published: 8139 msgs (94.6/s)
+  Received:  0 msgs (0.0/s)
+  Errors:    0 (0.00%)
+  Elapsed:   86.0s
+
+publishers_with_target_fields:
+  Published: 7229 msgs (84.0/s)
+  Received:  0 msgs (0.0/s)
+  Errors:    0 (0.00%)
+  Elapsed:   86.0s
+
+subscribers:
+  Published: 0 msgs (0.0/s)
+  Received:  0 msgs (0.0/s)
+  Errors:    0 (0.00%)
+  Elapsed:   86.0s
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📈 Progress Report - 12:39:34
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+publishers_without_target_fields:
+  Published: 9138 msgs (95.2/s)
+  Received:  0 msgs (0.0/s)
+  Errors:    0 (0.00%)
+  Elapsed:   96.0s
+
+publishers_with_target_fields:
+  Published: 8229 msgs (85.7/s)
+  Received:  0 msgs (0.0/s)
+  Errors:    0 (0.00%)
+  Elapsed:   96.0s
+
+subscribers:
+  Published: 0 msgs (0.0/s)
+  Received:  0 msgs (0.0/s)
+  Errors:    0 (0.00%)
+  Elapsed:   96.0s
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📈 Progress Report - 12:39:44
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+publishers_without_target_fields:
+  Published: 10136 msgs (95.6/s)
+  Received:  0 msgs (0.0/s)
+  Errors:    0 (0.00%)
+  Elapsed:   106.0s
+
+publishers_with_target_fields:
+  Published: 9229 msgs (87.0/s)
+  Received:  0 msgs (0.0/s)
+  Errors:    0 (0.00%)
+  Elapsed:   106.0s
+
+subscribers:
+  Published: 0 msgs (0.0/s)
+  Received:  0 msgs (0.0/s)
+  Errors:    0 (0.00%)
+  Elapsed:   106.0s
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📈 Progress Report - 12:39:54
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+publishers_without_target_fields:
+  Published: 11136 msgs (96.0/s)
+  Received:  0 msgs (0.0/s)
+  Errors:    0 (0.00%)
+  Elapsed:   116.0s
+
+publishers_with_target_fields:
+  Published: 10229 msgs (88.2/s)
+  Received:  0 msgs (0.0/s)
+  Errors:    0 (0.00%)
+  Elapsed:   116.0s
+
+subscribers:
+  Published: 0 msgs (0.0/s)
+  Received:  0 msgs (0.0/s)
+  Errors:    0 (0.00%)
+  Elapsed:   116.0s
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📈 Progress Report - 12:40:04
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+publishers_without_target_fields:
+  Published: 12137 msgs (96.3/s)
+  Received:  0 msgs (0.0/s)
+  Errors:    0 (0.00%)
+  Elapsed:   126.0s
+
+publishers_with_target_fields:
+  Published: 11229 msgs (89.1/s)
+  Received:  0 msgs (0.0/s)
+  Errors:    0 (0.00%)
+  Elapsed:   126.0s
+
+subscribers:
+  Published: 0 msgs (0.0/s)
+  Received:  0 msgs (0.0/s)
+  Errors:    0 (0.00%)
+  Elapsed:   126.0s
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📈 Progress Report - 12:40:14
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+publishers_without_target_fields:
+  Published: 13137 msgs (96.6/s)
+  Received:  0 msgs (0.0/s)
+  Errors:    0 (0.00%)
+  Elapsed:   136.0s
+
+publishers_with_target_fields:
+  Published: 12229 msgs (89.9/s)
+  Received:  0 msgs (0.0/s)
+  Errors:    0 (0.00%)
+  Elapsed:   136.0s
+
+subscribers:
+  Published: 0 msgs (0.0/s)
+  Received:  0 msgs (0.0/s)
+  Errors:    0 (0.00%)
+  Elapsed:   136.0s
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📈 Progress Report - 12:40:24
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+publishers_without_target_fields:
+  Published: 14138 msgs (96.8/s)
+  Received:  0 msgs (0.0/s)
+  Errors:    0 (0.00%)
+  Elapsed:   146.0s
+
+publishers_with_target_fields:
+  Published: 13229 msgs (90.6/s)
+  Received:  0 msgs (0.0/s)
+  Errors:    0 (0.00%)
+  Elapsed:   146.0s
+
+subscribers:
+  Published: 0 msgs (0.0/s)
+  Received:  0 msgs (0.0/s)
+  Errors:    0 (0.00%)
+  Elapsed:   146.0s
+
+🛑 Stopping load test...
+
+============================================================
+📊 FINAL REPORT - basic_load_test
+============================================================
+
+publishers_without_target_fields:
+  Total Published:  14143 msgs
+  Total Received:   0 msgs
+  Errors:           0
+  Publish Rate:     95.5 msg/s
+  Receive Rate:     0.0 msg/s
+  Error Rate:       0.00%
+
+publishers_with_target_fields:
+  Total Published:  13239 msgs
+  Total Received:   0 msgs
+  Errors:           0
+  Publish Rate:     89.4 msg/s
+  Receive Rate:     0.0 msg/s
+  Error Rate:       0.00%
+
+subscribers:
+  Total Published:  0 msgs
+  Total Received:   0 msgs
+  Errors:           0
+  Publish Rate:     0.0 msg/s
+  Receive Rate:     0.0 msg/s
+  Error Rate:       0.00%
+
+------------------------------------------------------------
+TOTAL:
+  Messages Published: 27382
+  Messages Received:  0
+  Total Errors:       0
+============================================================
+
+✅ Load test completed successfully
+Joses-MacBook-Pro:event_bus_client jose$ 

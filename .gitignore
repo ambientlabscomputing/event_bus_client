@@ -1,1 +1,43 @@
+# Configuration files (contains sensitive credentials)
 config.yaml
+
+# Build artifacts
+bin/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binaries
+*.test
+
+# Coverage files
+*.out
+*.prof
+
+# Binaries in root directory
+eventbus_cli
+loadtest
+
+# Log files
+*.log
+
+# Test results
+*.txt
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# OS specific
+Thumbs.db
+.Spotlight-V100
+.Trashes
+
+# Go workspace file
+go.work

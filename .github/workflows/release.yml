@@ -1,0 +1,75 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.24.3'
+
+    - name: Build binaries
+      run: |
+        # Linux AMD64
+        GOOS=linux GOARCH=amd64 go build -o bin/eventbus_cli-linux-amd64 cmd/eventbus_cli/main.go
+        GOOS=linux GOARCH=amd64 go build -o bin/loadtest-linux-amd64 cmd/loadtest/main.go
+        
+        # Linux ARM64
+        GOOS=linux GOARCH=arm64 go build -o bin/eventbus_cli-linux-arm64 cmd/eventbus_cli/main.go
+        GOOS=linux GOARCH=arm64 go build -o bin/loadtest-linux-arm64 cmd/loadtest/main.go
+        
+        # macOS AMD64
+        GOOS=darwin GOARCH=amd64 go build -o bin/eventbus_cli-darwin-amd64 cmd/eventbus_cli/main.go
+        GOOS=darwin GOARCH=amd64 go build -o bin/loadtest-darwin-amd64 cmd/loadtest/main.go
+        
+        # macOS ARM64 (M1/M2)
+        GOOS=darwin GOARCH=arm64 go build -o bin/eventbus_cli-darwin-arm64 cmd/eventbus_cli/main.go
+        GOOS=darwin GOARCH=arm64 go build -o bin/loadtest-darwin-arm64 cmd/loadtest/main.go
+        
+        # Windows AMD64
+        GOOS=windows GOARCH=amd64 go build -o bin/eventbus_cli-windows-amd64.exe cmd/eventbus_cli/main.go
+        GOOS=windows GOARCH=amd64 go build -o bin/loadtest-windows-amd64.exe cmd/loadtest/main.go
+
+    - name: Create Release
+      uses: softprops/action-gh-release@v1
+      with:
+        files: |
+          bin/eventbus_cli-*
+          bin/loadtest-*
+        body: |
+          See [CHANGELOG.md](https://github.com/ambientlabscomputing/event_bus_client/blob/main/CHANGELOG.md) for details.
+          
+          ## Installation
+          
+          Download the appropriate binary for your platform:
+          - **Linux AMD64**: `eventbus_cli-linux-amd64`, `loadtest-linux-amd64`
+          - **Linux ARM64**: `eventbus_cli-linux-arm64`, `loadtest-linux-arm64`
+          - **macOS AMD64**: `eventbus_cli-darwin-amd64`, `loadtest-darwin-amd64`
+          - **macOS ARM64** (M1/M2): `eventbus_cli-darwin-arm64`, `loadtest-darwin-arm64`
+          - **Windows AMD64**: `eventbus_cli-windows-amd64.exe`, `loadtest-windows-amd64.exe`
+          
+          Make the binary executable (Unix):
+          ```bash
+          chmod +x eventbus_cli-*
+          mv eventbus_cli-* /usr/local/bin/eventbus_cli
+          ```
+        draft: false
+        prerelease: false
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

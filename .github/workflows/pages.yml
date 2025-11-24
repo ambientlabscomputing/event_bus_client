@@ -1,0 +1,96 @@
+name: Deploy Documentation
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v4
+
+      - name: Create documentation site
+        run: |
+          mkdir -p _site
+          
+          # Copy main documentation
+          cp README.md _site/index.md
+          cp CONTRIBUTING.md _site/contributing.md
+          cp CHANGELOG.md _site/changelog.md
+          cp -r docs _site/docs
+          cp -r loadtest/README.md _site/loadtest.md
+          cp -r loadtest/examples _site/loadtest-examples
+          
+          # Create _config.yml for Jekyll
+          cat > _site/_config.yml << 'EOF'
+          title: Event Bus Client
+          description: High-performance Go client library for Ambient Labs Event Bus
+          theme: jekyll-theme-cayman
+          markdown: kramdown
+          plugins:
+            - jekyll-relative-links
+          relative_links:
+            enabled: true
+            collections: true
+          EOF
+          
+          # Create index page with navigation
+          cat > _site/index.md << 'EOF'
+          ---
+          layout: default
+          title: Event Bus Client
+          ---
+
+          # Event Bus Client Documentation
+
+          Welcome to the Event Bus Client documentation. This is a high-performance Go client library and CLI for the Ambient Labs Event Bus.
+
+          ## Navigation
+
+          - [Home](index.md) - Project overview and quick start
+          - [Contributing](contributing.md) - How to contribute to the project
+          - [Changelog](changelog.md) - Version history and changes
+          - [Load Testing](loadtest.md) - Load testing framework documentation
+          - [Test Results](docs/) - Performance test results and analysis
+
+          ## Quick Links
+
+          - [GitHub Repository](https://github.com/ambientlabscomputing/event_bus_client)
+          - [Issue Tracker](https://github.com/ambientlabscomputing/event_bus_client/issues)
+          - [Load Test Examples](loadtest-examples/)
+
+          ---
+
+          EOF
+          cat README.md >> _site/index.md
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: '_site'
+
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

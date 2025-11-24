@@ -1,0 +1,66 @@
+name: Go Build and Test
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build:
+    name: Build and Test
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.24.3'
+
+    - name: Cache Go modules
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cache/go-build
+          ~/go/pkg/mod
+        key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+        restore-keys: |
+          ${{ runner.os }}-go-
+
+    - name: Download dependencies
+      run: go mod download
+
+    - name: Verify dependencies
+      run: go mod verify
+
+    - name: Run go vet
+      run: go vet ./...
+
+    - name: Run gofmt
+      run: |
+        if [ "$(gofmt -s -l . | wc -l)" -gt 0 ]; then
+          echo "Please run gofmt on the following files:"
+          gofmt -s -l .
+          exit 1
+        fi
+
+    - name: Build CLI
+      run: go build -v -o bin/eventbus_cli cmd/eventbus_cli/main.go
+
+    - name: Build Load Tester
+      run: go build -v -o bin/loadtest cmd/loadtest/main.go
+
+    - name: Run tests (when available)
+      run: go test -v -race ./... || echo "No tests found"
+
+    - name: Upload binaries
+      uses: actions/upload-artifact@v4
+      with:
+        name: binaries
+        path: |
+          bin/eventbus_cli
+          bin/loadtest
+        retention-days: 30

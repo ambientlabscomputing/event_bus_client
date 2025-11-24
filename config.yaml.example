@@ -1,0 +1,23 @@
+# Event Bus Client Configuration
+# Copy this file to config.yaml and update with your credentials
+# Note: config.yaml is gitignored to protect sensitive information
+
+# WebSocket endpoint for the Event Bus server
+# Format: ws://hostname:port/ws or wss://hostname:port/ws for SSL
+endpoint: ws://localhost:9000/ws
+
+# JWT authentication token
+# Obtain this from your authentication service (e.g., Auth0)
+# This token should have the appropriate scopes for reading/writing events
+token: <your-jwt-token-here>
+
+# Consumer group ID
+# Used to identify this client's consumer group for offset tracking
+# Multiple clients with the same group_id will load balance message consumption
+# Different group_ids will each receive all messages independently
+group_id: <your-consumer-group-id>
+
+# Alternative: Use environment variables instead of this file
+# export EVENT_BUS_ENDPOINT="ws://localhost:9000/ws"
+# export EVENT_BUS_TOKEN="your-jwt-token"
+# export EVENT_BUS_GROUP_ID="your-consumer-group-id"

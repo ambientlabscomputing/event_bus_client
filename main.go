@@ -41,6 +41,11 @@ type EventClientOpts struct {
 type EventClient interface {
 	Connect(ctx context.Context, startingSubs *[]SubscriptionRequest) error
 	IncomingMsgChannel() chan Message
+	Publish(
+		ctx context.Context,
+		topic, content string,
+		targetType, targetID, traceID, orgID *string,
+	) (*AppendMessageResponse, error)
 }
 
 type Client struct {

@@ -46,6 +46,7 @@ type EventClient interface {
 		topic, content string,
 		targetType, targetID, traceID, orgID *string,
 	) (*AppendMessageResponse, error)
+	Subscribe(ctx context.Context, subReq SubscriptionRequest) error
 }
 
 type Client struct {

@@ -225,6 +225,10 @@ func (ec *Client) Subscribe(ctx context.Context, subReq SubscriptionRequest) err
 func (ec *Client) HandleConnection(ctx context.Context) {
 	defer ec.conn.Close()
 
+	// Circuit breaker: track consecutive invalid frames to detect connection issues
+	const maxConsecutiveInvalidFrames = 10
+	consecutiveInvalidFrames := 0
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -239,6 +243,30 @@ func (ec *Client) HandleConnection(ctx context.Context) {
 				close(ec.rawMsgChan)
 				return
 			}
+
+			// Validate frame has required fields to prevent processing empty/malformed frames
+			// This prevents the "no subscribers" log spam when connection is failing
+			if wfMsg.MessageType == "" || wfMsg.Version == "" {
+				consecutiveInvalidFrames++
+				logger.Debug("received empty or invalid frame",
+					"message_type", wfMsg.MessageType,
+					"version", wfMsg.Version,
+					"consecutive_invalid", consecutiveInvalidFrames)
+
+				// Circuit breaker: if we get too many invalid frames in a row,
+				// the connection is likely broken
+				if consecutiveInvalidFrames >= maxConsecutiveInvalidFrames {
+					logger.Error("too many consecutive invalid frames, connection appears broken",
+						"count", consecutiveInvalidFrames)
+					close(ec.incomingMsgChan)
+					close(ec.rawMsgChan)
+					return
+				}
+				continue
+			}
+
+			// Reset counter on valid frame
+			consecutiveInvalidFrames = 0
 
 			// Send to raw channel for verbose mode (non-blocking)
 			if ec.verbose {

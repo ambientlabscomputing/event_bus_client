@@ -56,6 +56,7 @@ type Client struct {
 	httpClient        *http.Client            // for HTTP POST publishing
 	writeMu           sync.Mutex              // protects WebSocket writes
 	ackMu             sync.Mutex              // protects ackChans map
+	subscriptionsMu   sync.RWMutex            // protects subscriptions map
 	subscriptions     map[string]Subscription // topic, subscription
 	incomingMsgChan   chan Message
 	offsetTracker     map[string]int                        // partition_id -> last processed message offset
@@ -150,10 +151,12 @@ func (ec *Client) Connect(ctx context.Context, startingSubs *[]SubscriptionReque
 			if err != nil {
 				return fmt.Errorf("failed to send subscription request: %w", err)
 			}
+			ec.subscriptionsMu.Lock()
 			ec.subscriptions[subReq.Topic] = Subscription{
 				SubscriptionRequest: subReq,
 				ID:                  "", // ID will be set upon receiving subscription response
 			}
+			ec.subscriptionsMu.Unlock()
 		}
 
 		// Trigger polling loop to start fetching messages for initial subscriptions
@@ -194,7 +197,10 @@ func (ec *Client) Subscribe(ctx context.Context, subReq SubscriptionRequest) err
 	}
 
 	// Check if already subscribed
-	if _, exists := ec.subscriptions[subReq.Topic]; exists {
+	ec.subscriptionsMu.RLock()
+	_, exists := ec.subscriptions[subReq.Topic]
+	ec.subscriptionsMu.RUnlock()
+	if exists {
 		return fmt.Errorf("already subscribed to topic: %s", subReq.Topic)
 	}
 
@@ -206,10 +212,12 @@ func (ec *Client) Subscribe(ctx context.Context, subReq SubscriptionRequest) err
 		return fmt.Errorf("failed to send subscription request: %w", err)
 	}
 
+	ec.subscriptionsMu.Lock()
 	ec.subscriptions[subReq.Topic] = Subscription{
 		SubscriptionRequest: subReq,
 		ID:                  "", // ID will be set upon receiving subscription response
 	}
+	ec.subscriptionsMu.Unlock()
 
 	logger.Debug("sent subscription request", "topic", subReq.Topic)
 
@@ -331,6 +339,7 @@ func (ec *Client) processMessage(wfMsg WebsocketFrame) {
 		wfSubResp := wfMsg.ToSubscriptionResp()
 		subResp := wfSubResp.Payload
 		logger.Debug("parsed subscription response", "topic", subResp.Topic, "subID", subResp.SubscriptionID, "groupID", subResp.GroupID)
+		ec.subscriptionsMu.Lock()
 		if sub, exists := ec.subscriptions[subResp.Topic]; exists {
 			sub.ID = subResp.SubscriptionID
 			ec.subscriptions[subResp.Topic] = sub
@@ -338,6 +347,7 @@ func (ec *Client) processMessage(wfMsg WebsocketFrame) {
 		} else {
 			logger.Warn("received subscription response for unknown topic", "topic", subResp.Topic)
 		}
+		ec.subscriptionsMu.Unlock()
 	case MessageTypeFetchResp:
 		// Parse the fetch response to extract events
 		wfFetchResp := wfMsg.ToFetchResponse()
@@ -488,12 +498,14 @@ func (ec *Client) CommitOffsets(ctx context.Context) error {
 		// Extract topic from partition_id (format: topic-partition-N)
 		// Find the subscription that matches this partition's topic
 		var subscriptionID string
+		ec.subscriptionsMu.RLock()
 		for topic, sub := range ec.subscriptions {
 			if len(partitionID) > len(topic) && partitionID[:len(topic)] == topic {
 				subscriptionID = sub.ID
 				break
 			}
 		}
+		ec.subscriptionsMu.RUnlock()
 
 		if subscriptionID == "" {
 			logger.Warn("no subscription found for partition", "partition", partitionID)
@@ -563,7 +575,11 @@ func (ec *Client) PollingLoop(ctx context.Context) {
 			return
 		default:
 			// Only send fetch if we have active subscriptions
-			if len(ec.subscriptions) == 0 {
+			ec.subscriptionsMu.RLock()
+			hasSubscriptions := len(ec.subscriptions) > 0
+			ec.subscriptionsMu.RUnlock()
+
+			if !hasSubscriptions {
 				// Wait for a subscription to be added
 				select {
 				case <-ec.fetchTrigger:

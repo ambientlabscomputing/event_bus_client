@@ -76,6 +76,15 @@ type Client struct {
 	privateKey     *ecdsa.PrivateKey
 	certificatePEM []byte
 	mtlsEnabled    bool
+	// Reconnection fields
+	reconnectMu       sync.RWMutex
+	reconnecting      bool
+	reconnectAttempts int
+	maxReconnectDelay time.Duration
+	mainCtx           context.Context     // main context for entire client lifecycle
+	mainCancel        context.CancelFunc  // cancels everything including reconnection
+	connCtx           context.Context     // context for current connection
+	connCancel        context.CancelFunc  // cancels current connection only
 }
 
 // buildWebSocketURL constructs the WebSocket endpoint from base endpoint
@@ -122,6 +131,7 @@ func NewEventClient(opts EventClientOpts) (*Client, error) {
 		verbose:           false,
 		fetchTrigger:      make(chan struct{}, 1),
 		fetchResponseChan: make(chan struct{}, 1),
+		maxReconnectDelay: 5 * time.Minute, // max backoff delay
 	}
 
 	// Initialize mTLS if certificate and key paths provided
@@ -161,8 +171,102 @@ func NewEventClient(opts EventClientOpts) (*Client, error) {
 // Connect establishes the connection to the event bus
 // and sets up initial subscriptions if provided.
 func (ec *Client) Connect(ctx context.Context, startingSubs *[]SubscriptionRequest) error {
-	// start websocket connection
-	// Build WebSocket URL: append /ws to base endpoint
+	// Store initial subscriptions if this is the first connect
+	if startingSubs != nil && len(ec.subscriptions) == 0 {
+		ec.subscriptionsMu.Lock()
+		for _, subReq := range *startingSubs {
+			ec.subscriptions[subReq.Topic] = Subscription{
+				SubscriptionRequest: subReq,
+				ID:                  "",
+			}
+		}
+		ec.subscriptionsMu.Unlock()
+	}
+
+	// Create main context that lives for the entire client lifecycle
+	ec.mainCtx, ec.mainCancel = context.WithCancel(ctx)
+
+	// Start connection with auto-reconnect
+	if err := ec.connectWithRetry(ec.mainCtx); err != nil {
+		return err
+	}
+
+	// Start background services that persist across reconnections
+	go ec.OffsetManager(ec.mainCtx)
+	go ec.reconnectionMonitor(ec.mainCtx)
+
+	return nil
+}
+
+// connectWithRetry attempts to establish a WebSocket connection with exponential backoff
+func (ec *Client) connectWithRetry(ctx context.Context) error {
+	ec.reconnectMu.Lock()
+	if ec.reconnecting {
+		ec.reconnectMu.Unlock()
+		return fmt.Errorf("reconnection already in progress")
+	}
+	ec.reconnecting = true
+	ec.reconnectMu.Unlock()
+
+	defer func() {
+		ec.reconnectMu.Lock()
+		ec.reconnecting = false
+		ec.reconnectMu.Unlock()
+	}()
+
+	attempt := 0
+	maxAttempts := 10 // After 10 attempts, keep retrying with max delay
+
+	for {
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("connection cancelled: %w", ctx.Err())
+		default:
+		}
+
+		attempt++
+		if attempt > 1 {
+			// Calculate exponential backoff: 1s, 2s, 4s, 8s, 16s, 32s, 64s, 128s, 256s, 300s (max)
+			backoff := time.Duration(1<<uint(attempt-2)) * time.Second
+			if backoff > ec.maxReconnectDelay {
+				backoff = ec.maxReconnectDelay
+			}
+			
+			logger.Info("reconnection attempt", "attempt", attempt, "backoff", backoff)
+			
+			select {
+			case <-time.After(backoff):
+			case <-ctx.Done():
+				return fmt.Errorf("connection cancelled during backoff: %w", ctx.Err())
+			}
+		} else {
+			logger.Info("establishing initial connection")
+		}
+
+		// Attempt connection
+		if err := ec.establishConnection(ctx); err != nil {
+			logger.Warn("connection attempt failed", "attempt", attempt, "error", err)
+			
+			// Continue retrying unless max attempts reached (for initial connect only)
+			if attempt >= maxAttempts && ec.reconnectAttempts == 0 {
+				return fmt.Errorf("failed to establish initial connection after %d attempts: %w", maxAttempts, err)
+			}
+			continue
+		}
+
+		// Connection successful
+		ec.reconnectMu.Lock()
+		ec.reconnectAttempts = 0
+		ec.reconnectMu.Unlock()
+		
+		logger.Info("connection established successfully")
+		return nil
+	}
+}
+
+// establishConnection creates a single WebSocket connection attempt
+func (ec *Client) establishConnection(ctx context.Context) error {
+	// Build WebSocket URL
 	wsEndpoint := ec.buildWebSocketURL()
 
 	// Build connection URL with token if using JWT, otherwise use mTLS headers
@@ -180,8 +284,6 @@ func (ec *Client) Connect(ctx context.Context, startingSubs *[]SubscriptionReque
 		logger.Debug("connecting with JWT authentication")
 	}
 
-	logger.Debug("connection URL", "connURL", connectionURL)
-
 	// Create a dialer with handshake timeout to prevent hanging indefinitely
 	dialer := websocket.Dialer{
 		HandshakeTimeout: 10 * time.Second,
@@ -191,64 +293,158 @@ func (ec *Client) Connect(ctx context.Context, startingSubs *[]SubscriptionReque
 
 	conn, _, err := dialer.DialContext(ctx, connectionURL, headers)
 	if err != nil {
-		return fmt.Errorf("failed to connect to event bus: %w", err)
+		return fmt.Errorf("failed to dial: %w", err)
 	}
+
+	// Store connection
+	ec.writeMu.Lock()
 	ec.conn = conn
-	logger.Debug("websocket connection established", "conn", ec.conn)
-	go ec.HandleConnection(ctx)
+	ec.writeMu.Unlock()
 
-	// set up initial subscriptions
-	if startingSubs != nil {
-		logger.Debug("setting up initial subscriptions", "subs", startingSubs)
-		for _, subReq := range *startingSubs {
-			wfSubReq := NewWebsocketFramedSubscriptionReq(subReq)
-			ec.writeMu.Lock()
-			err := ec.conn.WriteJSON(wfSubReq)
-			ec.writeMu.Unlock()
-			if err != nil {
-				return fmt.Errorf("failed to send subscription request: %w", err)
-			}
-			ec.subscriptionsMu.Lock()
-			ec.subscriptions[subReq.Topic] = Subscription{
-				SubscriptionRequest: subReq,
-				ID:                  "", // ID will be set upon receiving subscription response
-			}
-			ec.subscriptionsMu.Unlock()
-		}
+	logger.Debug("websocket connection established")
 
-		// Trigger polling loop to start fetching messages for initial subscriptions
-		select {
-		case ec.fetchTrigger <- struct{}{}:
-			logger.Debug("triggered polling loop for initial subscriptions")
-		default:
-			// Channel already has a signal
-		}
+	// Create context for this specific connection
+	ec.connCtx, ec.connCancel = context.WithCancel(ctx)
+
+	// Start connection handler
+	go ec.HandleConnection(ec.connCtx)
+
+	// Re-subscribe to all topics
+	if err := ec.resubscribeAll(); err != nil {
+		conn.Close()
+		return fmt.Errorf("failed to resubscribe: %w", err)
 	}
 
-	// start offset commit manager
-	go ec.OffsetManager(ctx)
-
-	// start polling loop for fetch requests
-	ec.pollingCtx, ec.pollingCancel = context.WithCancel(ctx)
+	// Start polling loop for this connection
+	ec.pollingCtx, ec.pollingCancel = context.WithCancel(ec.connCtx)
 	go ec.PollingLoop(ec.pollingCtx)
+
+	// Trigger polling to start
+	select {
+	case ec.fetchTrigger <- struct{}{}:
+		logger.Debug("triggered polling loop")
+	default:
+	}
 
 	return nil
 }
 
+// resubscribeAll sends subscription requests for all stored subscriptions
+func (ec *Client) resubscribeAll() error {
+	ec.subscriptionsMu.RLock()
+	subs := make([]SubscriptionRequest, 0, len(ec.subscriptions))
+	for _, sub := range ec.subscriptions {
+		subs = append(subs, sub.SubscriptionRequest)
+	}
+	ec.subscriptionsMu.RUnlock()
+
+	if len(subs) == 0 {
+		return nil
+	}
+
+	logger.Info("resubscribing to topics", "count", len(subs))
+
+	for _, subReq := range subs {
+		wfSubReq := NewWebsocketFramedSubscriptionReq(subReq)
+		ec.writeMu.Lock()
+		err := ec.conn.WriteJSON(wfSubReq)
+		ec.writeMu.Unlock()
+		if err != nil {
+			return fmt.Errorf("failed to send subscription request for topic %s: %w", subReq.Topic, err)
+		}
+		
+		// Reset subscription ID (will be set when response received)
+		ec.subscriptionsMu.Lock()
+		if sub, exists := ec.subscriptions[subReq.Topic]; exists {
+			sub.ID = ""
+			ec.subscriptions[subReq.Topic] = sub
+		}
+		ec.subscriptionsMu.Unlock()
+		
+		logger.Debug("sent resubscription request", "topic", subReq.Topic)
+	}
+
+	return nil
+}
+
+// reconnectionMonitor watches for connection failures and triggers reconnection
+func (ec *Client) reconnectionMonitor(ctx context.Context) {
+	for {
+		select {
+		case <-ctx.Done():
+			logger.Info("reconnection monitor stopped")
+			return
+		default:
+		}
+
+		// Wait for connection context to be cancelled (indicates connection lost)
+		if ec.connCtx != nil {
+			<-ec.connCtx.Done()
+		} else {
+			// No connection context yet, wait a bit
+			time.Sleep(time.Second)
+			continue
+		}
+
+		// Check if main context is still active
+		select {
+		case <-ctx.Done():
+			logger.Info("main context cancelled, stopping reconnection monitor")
+			return
+		default:
+		}
+
+		logger.Warn("connection lost, initiating reconnection")
+
+		// Stop polling loop for old connection
+		if ec.pollingCancel != nil {
+			ec.pollingCancel()
+		}
+
+		// Increment reconnect attempts
+		ec.reconnectMu.Lock()
+		ec.reconnectAttempts++
+		ec.reconnectMu.Unlock()
+
+		// Attempt to reconnect
+		if err := ec.connectWithRetry(ctx); err != nil {
+			logger.Error("failed to reconnect", "error", err)
+			return
+		}
+
+		logger.Info("reconnection successful")
+	}
+}
+
 // Close gracefully shuts down the event bus client
 func (ec *Client) Close() error {
+	// Cancel main context to stop all background services including reconnection
+	if ec.mainCancel != nil {
+		ec.mainCancel()
+	}
+
+	// Cancel current connection
+	if ec.connCancel != nil {
+		ec.connCancel()
+	}
+
 	// Cancel polling loop
 	if ec.pollingCancel != nil {
 		ec.pollingCancel()
 	}
 
-	// Close WebSocket connection (this will cause HandleConnection to exit)
+	// Close WebSocket connection
 	if ec.conn != nil {
 		ec.conn.Close()
 	}
 
 	logger.Info("event bus client closed")
 	return nil
+}
+
+// Stop is an alias for Close for backward compatibility
+func (ec *Client) Stop() error {
+	return ec.Close()
 }
 
 func (ec *Client) IncomingMsgChannel() chan Message {
@@ -265,16 +461,31 @@ func (ec *Client) SetVerbose(verbose bool) {
 
 // Subscribe adds a new subscription to an existing connection
 func (ec *Client) Subscribe(ctx context.Context, subReq SubscriptionRequest) error {
-	if ec.conn == nil {
-		return fmt.Errorf("not connected to event bus")
-	}
-
 	// Check if already subscribed
 	ec.subscriptionsMu.RLock()
 	_, exists := ec.subscriptions[subReq.Topic]
 	ec.subscriptionsMu.RUnlock()
 	if exists {
-		return fmt.Errorf("already subscribed to topic: %s", subReq.Topic)
+		logger.Debug("already subscribed to topic", "topic", subReq.Topic)
+		return nil // Not an error, just idempotent
+	}
+
+	// Store subscription first (will be sent/resent on connect/reconnect)
+	ec.subscriptionsMu.Lock()
+	ec.subscriptions[subReq.Topic] = Subscription{
+		SubscriptionRequest: subReq,
+		ID:                  "", // ID will be set upon receiving subscription response
+	}
+	ec.subscriptionsMu.Unlock()
+
+	// Try to send immediately if connected
+	ec.writeMu.Lock()
+	conn := ec.conn
+	ec.writeMu.Unlock()
+
+	if conn == nil {
+		logger.Debug("not connected yet, subscription will be sent on connect", "topic", subReq.Topic)
+		return nil
 	}
 
 	wfSubReq := NewWebsocketFramedSubscriptionReq(subReq)
@@ -282,15 +493,10 @@ func (ec *Client) Subscribe(ctx context.Context, subReq SubscriptionRequest) err
 	err := ec.conn.WriteJSON(wfSubReq)
 	ec.writeMu.Unlock()
 	if err != nil {
-		return fmt.Errorf("failed to send subscription request: %w", err)
+		logger.Warn("failed to send subscription request, will retry on reconnect", "topic", subReq.Topic, "error", err)
+		// Don't return error - subscription is stored and will be retried
+		return nil
 	}
-
-	ec.subscriptionsMu.Lock()
-	ec.subscriptions[subReq.Topic] = Subscription{
-		SubscriptionRequest: subReq,
-		ID:                  "", // ID will be set upon receiving subscription response
-	}
-	ec.subscriptionsMu.Unlock()
 
 	logger.Debug("sent subscription request", "topic", subReq.Topic)
 
@@ -304,8 +510,17 @@ func (ec *Client) Subscribe(ctx context.Context, subReq SubscriptionRequest) err
 }
 
 func (ec *Client) HandleConnection(ctx context.Context) {
-	defer ec.conn.Close()
-	defer logger.Info("HandleConnection exiting - WebSocket connection closed")
+	defer func() {
+		if ec.conn != nil {
+			ec.conn.Close()
+		}
+		logger.Info("HandleConnection exiting - WebSocket connection closed")
+		
+		// Cancel connection context to trigger reconnection
+		if ec.connCancel != nil {
+			ec.connCancel()
+		}
+	}()
 
 	// Circuit breaker: track consecutive invalid frames to detect connection issues
 	const maxConsecutiveInvalidFrames = 10
@@ -315,15 +530,11 @@ func (ec *Client) HandleConnection(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			logger.Info("HandleConnection context canceled")
-			close(ec.incomingMsgChan)
-			close(ec.rawMsgChan)
 			return
 		default:
 			var wfMsg WebsocketFrame
 			if err := ec.conn.ReadJSON(&wfMsg); err != nil {
-				logger.Error("WebSocket read error - connection lost", "error", err)
-				close(ec.incomingMsgChan)
-				close(ec.rawMsgChan)
+				logger.Warn("WebSocket read error - connection lost", "error", err)
 				return
 			}
 
@@ -339,10 +550,8 @@ func (ec *Client) HandleConnection(ctx context.Context) {
 				// Circuit breaker: if we get too many invalid frames in a row,
 				// the connection is likely broken
 				if consecutiveInvalidFrames >= maxConsecutiveInvalidFrames {
-					logger.Error("too many consecutive invalid frames, connection appears broken",
+					logger.Warn("too many consecutive invalid frames, connection appears broken",
 						"count", consecutiveInvalidFrames)
-					close(ec.incomingMsgChan)
-					close(ec.rawMsgChan)
 					return
 				}
 				continue
@@ -627,10 +836,21 @@ func (ec *Client) OffsetManager(ctx context.Context) {
 	for {
 		select {
 		case <-ticker.C:
+			// Skip if not connected
+			ec.writeMu.Lock()
+			connected := ec.conn != nil
+			ec.writeMu.Unlock()
+			
+			if !connected {
+				logger.Debug("skipping offset commit, not connected")
+				continue
+			}
+			
 			if err := ec.CommitOffsets(ctx); err != nil {
-				logger.Error("failed to commit offsets", "error", err)
+				logger.Warn("failed to commit offsets", "error", err)
 			}
 		case <-ctx.Done():
+			logger.Debug("offset manager stopped")
 			return
 		}
 	}
@@ -640,6 +860,9 @@ func (ec *Client) OffsetManager(ctx context.Context) {
 // The server holds each request for up to 5 seconds, providing near-instant
 // message delivery when available while minimizing network overhead
 func (ec *Client) PollingLoop(ctx context.Context) {
+	logger.Debug("polling loop started")
+	defer logger.Debug("polling loop stopped")
+	
 	// Wait for first subscription before starting to poll
 	select {
 	case <-ec.fetchTrigger:
@@ -654,6 +877,17 @@ func (ec *Client) PollingLoop(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		default:
+			// Check if still connected
+			ec.writeMu.Lock()
+			connected := ec.conn != nil
+			ec.writeMu.Unlock()
+			
+			if !connected {
+				logger.Debug("polling loop paused, not connected")
+				time.Sleep(time.Second)
+				continue
+			}
+			
 			// Only send fetch if we have active subscriptions
 			ec.subscriptionsMu.RLock()
 			hasSubscriptions := len(ec.subscriptions) > 0
@@ -671,7 +905,7 @@ func (ec *Client) PollingLoop(ctx context.Context) {
 
 			// Send fetch request - server will hold for up to 5 seconds
 			if err := ec.sendFetchRequest(); err != nil {
-				logger.Error("failed to send fetch request", "error", err)
+				logger.Warn("failed to send fetch request", "error", err)
 				// Brief delay on error to avoid tight error loop
 				time.Sleep(time.Second)
 				continue

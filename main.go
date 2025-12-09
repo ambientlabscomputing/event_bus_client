@@ -289,6 +289,7 @@ func (ec *Client) Subscribe(ctx context.Context, subReq SubscriptionRequest) err
 
 func (ec *Client) HandleConnection(ctx context.Context) {
 	defer ec.conn.Close()
+	defer logger.Info("HandleConnection exiting - WebSocket connection closed")
 
 	// Circuit breaker: track consecutive invalid frames to detect connection issues
 	const maxConsecutiveInvalidFrames = 10
@@ -297,13 +298,14 @@ func (ec *Client) HandleConnection(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
+			logger.Info("HandleConnection context canceled")
 			close(ec.incomingMsgChan)
 			close(ec.rawMsgChan)
 			return
 		default:
 			var wfMsg WebsocketFrame
 			if err := ec.conn.ReadJSON(&wfMsg); err != nil {
-				logger.Warn("failed to read message", "err", err)
+				logger.Error("WebSocket read error - connection lost", "error", err)
 				close(ec.incomingMsgChan)
 				close(ec.rawMsgChan)
 				return
@@ -661,11 +663,16 @@ func (ec *Client) PollingLoop(ctx context.Context) {
 
 			// Wait for fetch response before sending next request
 			// This prevents flooding the server with requests
+			// Add timeout to prevent hanging if connection dies
 			select {
 			case <-ec.fetchResponseChan:
 				// Got response, add minimum 100ms delay as required by server rate limiting
 				time.Sleep(100 * time.Millisecond)
 				// Loop will send next fetch
+			case <-time.After(15 * time.Second):
+				// Timeout waiting for response - connection may be dead
+				logger.Warn("fetch response timeout - connection may be dead")
+				return
 			case <-ctx.Done():
 				return
 			}

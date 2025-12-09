@@ -3,6 +3,7 @@ package event_bus_client
 import (
 	"bytes"
 	"context"
+	"crypto/ecdsa"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -33,9 +34,12 @@ const (
 
 type EventClientOpts struct {
 	Endpoint       string
-	AuthToken      string
+	AuthToken      string // JWT token for authentication (optional if using mTLS)
 	CommitInterval string
 	GroupID        string
+	// mTLS Authentication (optional, alternative to AuthToken)
+	CertPath string // Path to client certificate PEM file
+	KeyPath  string // Path to private key PEM file
 }
 
 type EventClient interface {
@@ -68,6 +72,10 @@ type Client struct {
 	pollingCancel     context.CancelFunc
 	fetchTrigger      chan struct{} // signals when to start fetching
 	fetchResponseChan chan struct{} // signals when fetch response is received
+	// mTLS fields
+	privateKey     *ecdsa.PrivateKey
+	certificatePEM []byte
+	mtlsEnabled    bool
 }
 
 // buildWebSocketURL constructs the WebSocket endpoint from base endpoint
@@ -95,23 +103,16 @@ func (ec *Client) buildHTTPBaseURL() string {
 	return endpoint
 }
 
-func NewEventClient(opts EventClientOpts) *Client {
+func NewEventClient(opts EventClientOpts) (*Client, error) {
 	cInterval, err := time.ParseDuration(opts.CommitInterval)
 	if err != nil {
 		cInterval = 5 * time.Second
 	}
 	opts.CommitInterval = cInterval.String()
-	return &Client{
-		opts:           opts,
-		commitInterval: cInterval,
-		httpClient: &http.Client{
-			Timeout: 10 * time.Second,
-			Transport: &http.Transport{
-				MaxIdleConns:        100,
-				MaxIdleConnsPerHost: 100,
-				IdleConnTimeout:     90 * time.Second,
-			},
-		},
+
+	client := &Client{
+		opts:              opts,
+		commitInterval:    cInterval,
 		incomingMsgChan:   make(chan Message, 100),
 		subscriptions:     make(map[string]Subscription),
 		offsetTracker:     make(map[string]int),
@@ -122,6 +123,39 @@ func NewEventClient(opts EventClientOpts) *Client {
 		fetchTrigger:      make(chan struct{}, 1),
 		fetchResponseChan: make(chan struct{}, 1),
 	}
+
+	// Initialize mTLS if certificate and key paths provided
+	if opts.CertPath != "" && opts.KeyPath != "" {
+		if err := client.initMTLS(); err != nil {
+			return nil, fmt.Errorf("failed to initialize mTLS: %w", err)
+		}
+		logger.Info("mTLS authentication enabled")
+	} else if opts.AuthToken == "" {
+		return nil, fmt.Errorf("either AuthToken or CertPath/KeyPath must be provided")
+	}
+
+	// Create HTTP client with appropriate transport
+	baseTransport := &http.Transport{
+		MaxIdleConns:        100,
+		MaxIdleConnsPerHost: 100,
+		IdleConnTimeout:     90 * time.Second,
+	}
+
+	var transport http.RoundTripper = baseTransport
+	if client.mtlsEnabled {
+		transport = &MTLSTransport{
+			base:           baseTransport,
+			privateKey:     client.privateKey,
+			certificatePEM: client.certificatePEM,
+		}
+	}
+
+	client.httpClient = &http.Client{
+		Timeout:   10 * time.Second,
+		Transport: transport,
+	}
+
+	return client, nil
 }
 
 // Connect establishes the connection to the event bus
@@ -130,17 +164,32 @@ func (ec *Client) Connect(ctx context.Context, startingSubs *[]SubscriptionReque
 	// start websocket connection
 	// Build WebSocket URL: append /ws to base endpoint
 	wsEndpoint := ec.buildWebSocketURL()
-	connectionURL := fmt.Sprintf("%s?token=%s", wsEndpoint, ec.opts.AuthToken)
+
+	// Build connection URL with token if using JWT, otherwise use mTLS headers
+	var connectionURL string
+	var headers http.Header
+
+	if ec.mtlsEnabled {
+		// mTLS authentication - no token in query params
+		connectionURL = wsEndpoint
+		headers = ec.getWebSocketHeaders()
+		logger.Debug("connecting with mTLS authentication")
+	} else {
+		// JWT authentication - token in query params
+		connectionURL = fmt.Sprintf("%s?token=%s", wsEndpoint, ec.opts.AuthToken)
+		logger.Debug("connecting with JWT authentication")
+	}
+
 	logger.Debug("connection URL", "connURL", connectionURL)
-	
+
 	// Create a dialer with handshake timeout to prevent hanging indefinitely
 	dialer := websocket.Dialer{
 		HandshakeTimeout: 10 * time.Second,
 		Proxy:            websocket.DefaultDialer.Proxy,
 		TLSClientConfig:  websocket.DefaultDialer.TLSClientConfig,
 	}
-	
-	conn, _, err := dialer.DialContext(ctx, connectionURL, nil)
+
+	conn, _, err := dialer.DialContext(ctx, connectionURL, headers)
 	if err != nil {
 		return fmt.Errorf("failed to connect to event bus: %w", err)
 	}
@@ -462,7 +511,12 @@ func (ec *Client) Publish(
 
 	// Set headers
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+ec.opts.AuthToken)
+
+	// Add authentication - either JWT or mTLS (handled by transport)
+	if !ec.mtlsEnabled {
+		req.Header.Set("Authorization", "Bearer "+ec.opts.AuthToken)
+	}
+	// Note: mTLS headers are added automatically by MTLSTransport
 
 	// Send request
 	resp, err := ec.httpClient.Do(req)

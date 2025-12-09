@@ -31,7 +31,7 @@ func runPublish(cmd *cobra.Command, args []string) error {
 	content := args[1]
 
 	// Get config (flags override config file)
-	endpoint, token, groupID, err := GetConfig()
+	endpoint, token, groupID, certPath, keyPath, err := GetConfig()
 	if err != nil {
 		return err
 	}
@@ -41,9 +41,14 @@ func runPublish(cmd *cobra.Command, args []string) error {
 		AuthToken:      token,
 		CommitInterval: "5s",
 		GroupID:        groupID,
+		CertPath:       certPath,
+		KeyPath:        keyPath,
 	}
 
-	client := event_bus_client.NewEventClient(opts)
+	client, err := event_bus_client.NewEventClient(opts)
+	if err != nil {
+		return fmt.Errorf("failed to create client: %w", err)
+	}
 
 	ctx := context.Background()
 	// Note: Publish now uses HTTP POST, no WebSocket connection needed

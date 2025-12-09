@@ -44,7 +44,7 @@ type Shell struct {
 
 func runShell(cmd *cobra.Command, args []string) error {
 	// Get config
-	endpoint, token, groupID, err := GetConfig()
+	endpoint, token, groupID, certPath, keyPath, err := GetConfig()
 	if err != nil {
 		return err
 	}
@@ -54,9 +54,14 @@ func runShell(cmd *cobra.Command, args []string) error {
 		AuthToken:      token,
 		CommitInterval: "5s",
 		GroupID:        groupID,
+		CertPath:       certPath,
+		KeyPath:        keyPath,
 	}
 
-	client := event_bus_client.NewEventClient(opts)
+	client, err := event_bus_client.NewEventClient(opts)
+	if err != nil {
+		return fmt.Errorf("failed to create client: %w", err)
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -232,7 +237,7 @@ func (s *Shell) handleSubscribe(args []string) {
 	s.mu.Unlock()
 
 	// Get group ID from config
-	_, _, groupID, err := GetConfig()
+	_, _, groupID, _, _, err := GetConfig()
 	if err != nil {
 		color.Red("✗ Failed to get config: %v", err)
 		return

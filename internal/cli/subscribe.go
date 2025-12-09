@@ -33,7 +33,7 @@ func runSubscribe(cmd *cobra.Command, args []string) error {
 	color.White(fmt.Sprintf("subscribing to topic %s ...", topic))
 
 	// Get config (flags override config file)
-	endpoint, token, groupID, err := GetConfig()
+	endpoint, token, groupID, certPath, keyPath, err := GetConfig()
 	if err != nil {
 		return err
 	}
@@ -44,9 +44,14 @@ func runSubscribe(cmd *cobra.Command, args []string) error {
 		AuthToken:      token,
 		CommitInterval: "5s",
 		GroupID:        groupID,
+		CertPath:       certPath,
+		KeyPath:        keyPath,
 	}
 
-	client := event_bus_client.NewEventClient(opts)
+	client, err := event_bus_client.NewEventClient(opts)
+	if err != nil {
+		return fmt.Errorf("failed to create client: %w", err)
+	}
 	color.White("client initialized")
 
 	// Parse filter flags

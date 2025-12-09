@@ -235,6 +235,22 @@ func (ec *Client) Connect(ctx context.Context, startingSubs *[]SubscriptionReque
 	return nil
 }
 
+// Close gracefully shuts down the event bus client
+func (ec *Client) Close() error {
+	// Cancel polling loop
+	if ec.pollingCancel != nil {
+		ec.pollingCancel()
+	}
+
+	// Close WebSocket connection (this will cause HandleConnection to exit)
+	if ec.conn != nil {
+		ec.conn.Close()
+	}
+
+	logger.Info("event bus client closed")
+	return nil
+}
+
 func (ec *Client) IncomingMsgChannel() chan Message {
 	return ec.incomingMsgChan
 }

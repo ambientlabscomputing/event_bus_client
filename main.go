@@ -132,7 +132,15 @@ func (ec *Client) Connect(ctx context.Context, startingSubs *[]SubscriptionReque
 	wsEndpoint := ec.buildWebSocketURL()
 	connectionURL := fmt.Sprintf("%s?token=%s", wsEndpoint, ec.opts.AuthToken)
 	logger.Debug("connection URL", "connURL", connectionURL)
-	conn, _, err := websocket.DefaultDialer.DialContext(ctx, connectionURL, nil)
+	
+	// Create a dialer with handshake timeout to prevent hanging indefinitely
+	dialer := websocket.Dialer{
+		HandshakeTimeout: 10 * time.Second,
+		Proxy:            websocket.DefaultDialer.Proxy,
+		TLSClientConfig:  websocket.DefaultDialer.TLSClientConfig,
+	}
+	
+	conn, _, err := dialer.DialContext(ctx, connectionURL, nil)
 	if err != nil {
 		return fmt.Errorf("failed to connect to event bus: %w", err)
 	}

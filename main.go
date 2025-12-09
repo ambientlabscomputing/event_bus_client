@@ -81,10 +81,10 @@ type Client struct {
 	reconnecting      bool
 	reconnectAttempts int
 	maxReconnectDelay time.Duration
-	mainCtx           context.Context     // main context for entire client lifecycle
-	mainCancel        context.CancelFunc  // cancels everything including reconnection
-	connCtx           context.Context     // context for current connection
-	connCancel        context.CancelFunc  // cancels current connection only
+	mainCtx           context.Context    // main context for entire client lifecycle
+	mainCancel        context.CancelFunc // cancels everything including reconnection
+	connCtx           context.Context    // context for current connection
+	connCancel        context.CancelFunc // cancels current connection only
 }
 
 // buildWebSocketURL constructs the WebSocket endpoint from base endpoint
@@ -231,9 +231,9 @@ func (ec *Client) connectWithRetry(ctx context.Context) error {
 			if backoff > ec.maxReconnectDelay {
 				backoff = ec.maxReconnectDelay
 			}
-			
+
 			logger.Info("reconnection attempt", "attempt", attempt, "backoff", backoff)
-			
+
 			select {
 			case <-time.After(backoff):
 			case <-ctx.Done():
@@ -246,7 +246,7 @@ func (ec *Client) connectWithRetry(ctx context.Context) error {
 		// Attempt connection
 		if err := ec.establishConnection(ctx); err != nil {
 			logger.Warn("connection attempt failed", "attempt", attempt, "error", err)
-			
+
 			// Continue retrying unless max attempts reached (for initial connect only)
 			if attempt >= maxAttempts && ec.reconnectAttempts == 0 {
 				return fmt.Errorf("failed to establish initial connection after %d attempts: %w", maxAttempts, err)
@@ -258,7 +258,7 @@ func (ec *Client) connectWithRetry(ctx context.Context) error {
 		ec.reconnectMu.Lock()
 		ec.reconnectAttempts = 0
 		ec.reconnectMu.Unlock()
-		
+
 		logger.Info("connection established successfully")
 		return nil
 	}
@@ -277,7 +277,10 @@ func (ec *Client) establishConnection(ctx context.Context) error {
 		// mTLS authentication - no token in query params
 		connectionURL = wsEndpoint
 		headers = ec.getWebSocketHeaders()
-		logger.Debug("connecting with mTLS authentication")
+		logger.Info("connecting with mTLS authentication", "headers_set", len(headers))
+		for k, v := range headers {
+			logger.Debug("WebSocket header", "key", k, "value_length", len(v[0]))
+		}
 	} else {
 		// JWT authentication - token in query params
 		connectionURL = fmt.Sprintf("%s?token=%s", wsEndpoint, ec.opts.AuthToken)
@@ -352,7 +355,7 @@ func (ec *Client) resubscribeAll() error {
 		if err != nil {
 			return fmt.Errorf("failed to send subscription request for topic %s: %w", subReq.Topic, err)
 		}
-		
+
 		// Reset subscription ID (will be set when response received)
 		ec.subscriptionsMu.Lock()
 		if sub, exists := ec.subscriptions[subReq.Topic]; exists {
@@ -360,7 +363,7 @@ func (ec *Client) resubscribeAll() error {
 			ec.subscriptions[subReq.Topic] = sub
 		}
 		ec.subscriptionsMu.Unlock()
-		
+
 		logger.Debug("sent resubscription request", "topic", subReq.Topic)
 	}
 
@@ -389,7 +392,7 @@ func (ec *Client) reconnectionMonitor(ctx context.Context) {
 		// Check if main context is still active
 		select {
 		case <-ctx.Done():
-			logger.Info("main context cancelled, stopping reconnection monitor")
+			logger.Info("main context cancelled in reconnection monitor", "error", ctx.Err())
 			return
 		default:
 		}
@@ -418,6 +421,7 @@ func (ec *Client) reconnectionMonitor(ctx context.Context) {
 
 // Close gracefully shuts down the event bus client
 func (ec *Client) Close() error {
+	logger.Info("Close() called - cancelling mainCtx")
 	// Cancel main context to stop all background services including reconnection
 	if ec.mainCancel != nil {
 		ec.mainCancel()
@@ -515,7 +519,7 @@ func (ec *Client) HandleConnection(ctx context.Context) {
 			ec.conn.Close()
 		}
 		logger.Info("HandleConnection exiting - WebSocket connection closed")
-		
+
 		// Cancel connection context to trigger reconnection
 		if ec.connCancel != nil {
 			ec.connCancel()
@@ -840,12 +844,12 @@ func (ec *Client) OffsetManager(ctx context.Context) {
 			ec.writeMu.Lock()
 			connected := ec.conn != nil
 			ec.writeMu.Unlock()
-			
+
 			if !connected {
 				logger.Debug("skipping offset commit, not connected")
 				continue
 			}
-			
+
 			if err := ec.CommitOffsets(ctx); err != nil {
 				logger.Warn("failed to commit offsets", "error", err)
 			}
@@ -862,7 +866,7 @@ func (ec *Client) OffsetManager(ctx context.Context) {
 func (ec *Client) PollingLoop(ctx context.Context) {
 	logger.Debug("polling loop started")
 	defer logger.Debug("polling loop stopped")
-	
+
 	// Wait for first subscription before starting to poll
 	select {
 	case <-ec.fetchTrigger:
@@ -881,13 +885,13 @@ func (ec *Client) PollingLoop(ctx context.Context) {
 			ec.writeMu.Lock()
 			connected := ec.conn != nil
 			ec.writeMu.Unlock()
-			
+
 			if !connected {
 				logger.Debug("polling loop paused, not connected")
 				time.Sleep(time.Second)
 				continue
 			}
-			
+
 			// Only send fetch if we have active subscriptions
 			ec.subscriptionsMu.RLock()
 			hasSubscriptions := len(ec.subscriptions) > 0

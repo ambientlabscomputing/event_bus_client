@@ -3,6 +3,7 @@ package event_bus_client
 import (
 	"bytes"
 	"crypto/ecdsa"
+	"crypto/rand"
 	"crypto/sha256"
 	"crypto/x509"
 	"encoding/asn1"
@@ -94,7 +95,7 @@ func signData(privateKey *ecdsa.PrivateKey, data []byte) ([]byte, error) {
 	hash := sha256.Sum256(data)
 
 	// Sign the hash
-	r, s, err := ecdsa.Sign(nil, privateKey, hash[:])
+	r, s, err := ecdsa.Sign(rand.Reader, privateKey, hash[:])
 	if err != nil {
 		return nil, fmt.Errorf("failed to sign data: %w", err)
 	}
